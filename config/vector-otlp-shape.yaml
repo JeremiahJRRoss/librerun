@@ -1,0 +1,124 @@
+# ============================================================================
+# LibreRun — OTLP trace wire-shaping for the vendor overlays (blueprint S7a)
+#
+# Loaded together with a vendor overlay whenever LIBRERUN_OBS_VENDOR is
+# set; compose appends BOTH `--config` flags in one breath, so a vendor
+# overlay is never loaded without this file (its trace sink reads
+# `obs_otlp_shape` and Vector would refuse the config otherwise).
+#
+# Why it exists: Vector's own `opentelemetry` sink serializes Vector's
+# internal event shape, which OTLP receivers reject with 400 (the B5
+# finding, recorded in vector.yaml's gallery note). So a remap
+# re-assembles the spec's OTLP/JSON envelope and a plain `http` sink
+# POSTs it to the in-network otel-bridge, which re-exports OTLP
+# PROTOBUF to the vendor. The span itself is NOT modified: ids, name,
+# kind, timestamps, status, attributes and resource attributes are
+# carried across unchanged (L3's pass-through intent) — an overlay
+# forwards what Vector holds and never redacts, because both planes
+# reach Vector already walked (blueprint S4: the walkers and the relay
+# are the only way telemetry enters the box).
+#
+# The body below is the live-verified `viewer_otlp_shape` /
+# `cribl_otlp_shape` re-serializer, shared here rather than copied a
+# third and fourth time: three vendor overlays each carrying their own
+# copy is three places for one timestamp bug to hide.
+# ============================================================================
+
+transforms:
+  obs_otlp_shape:
+    type: remap
+    inputs:
+      - otlp.traces
+    source: |
+      attrs = []
+      for_each(object(.attributes) ?? {}) -> |k, v| {
+        val = {"stringValue": to_string(v) ?? ""}
+        if is_boolean(v) {
+          val = {"boolValue": v}
+        } else if is_integer(v) {
+          val = {"intValue": to_string(v) ?? "0"}
+        } else if is_float(v) {
+          val = {"doubleValue": v}
+        }
+        attrs = push(attrs, {"key": k, "value": val})
+      }
+      res_attrs = []
+      for_each(object(.resources) ?? {}) -> |k, v| {
+        res_attrs = push(res_attrs, {"key": k, "value": {"stringValue": to_string(v) ?? ""}})
+      }
+      # The OTLP source hands these over as VRL *timestamps*, not
+      # strings — `string!()` on one aborts the expression, and an
+      # abort swallowed by `?? now()` silently restamps every span with
+      # its ingest time (spans arrive in Jaeger with ~0 duration). Read
+      # the timestamp directly, and keep the string/integer branches for
+      # any source that spells them differently.
+      start_ts = 0
+      if is_timestamp(.start_time_unix_nano) {
+        start_ts = to_unix_timestamp(timestamp!(.start_time_unix_nano), unit: "nanoseconds")
+      } else if is_integer(.start_time_unix_nano) {
+        start_ts = int!(.start_time_unix_nano)
+      } else {
+        start_ts = to_unix_timestamp(parse_timestamp(to_string(.start_time_unix_nano) ?? "", "%+") ?? now(), unit: "nanoseconds")
+      }
+      end_ts = 0
+      if is_timestamp(.end_time_unix_nano) {
+        end_ts = to_unix_timestamp(timestamp!(.end_time_unix_nano), unit: "nanoseconds")
+      } else if is_integer(.end_time_unix_nano) {
+        end_ts = int!(.end_time_unix_nano)
+      } else {
+        end_ts = to_unix_timestamp(parse_timestamp(to_string(.end_time_unix_nano) ?? "", "%+") ?? now(), unit: "nanoseconds")
+      }
+      evts = []
+      for_each(array(.events) ?? []) -> |_i, ev| {
+        ev_attrs = []
+        for_each(object(ev.attributes) ?? {}) -> |k, v| {
+          val = {"stringValue": to_string(v) ?? ""}
+          if is_boolean(v) {
+            val = {"boolValue": v}
+          } else if is_integer(v) {
+            val = {"intValue": to_string(v) ?? "0"}
+          } else if is_float(v) {
+            val = {"doubleValue": v}
+          }
+          ev_attrs = push(ev_attrs, {"key": k, "value": val})
+        }
+        ev_ts = 0
+        if is_timestamp(ev.time_unix_nano) {
+          ev_ts = to_unix_timestamp(timestamp!(ev.time_unix_nano), unit: "nanoseconds")
+        } else if is_integer(ev.time_unix_nano) {
+          ev_ts = int!(ev.time_unix_nano)
+        } else {
+          ev_ts = to_unix_timestamp(parse_timestamp(to_string(ev.time_unix_nano) ?? "", "%+") ?? now(), unit: "nanoseconds")
+        }
+        evts = push(evts, {
+          "timeUnixNano": to_string(ev_ts),
+          "name": to_string(ev.name) ?? "",
+          "attributes": ev_attrs
+        })
+      }
+      span = {
+        "traceId": .trace_id,
+        "spanId": .span_id,
+        "name": .name,
+        "kind": .kind,
+        "startTimeUnixNano": to_string(start_ts),
+        "endTimeUnixNano": to_string(end_ts),
+        "attributes": attrs,
+        "status": {"code": to_int(.status.code) ?? 0}
+      }
+      if length(evts) > 0 {
+        span = set!(span, ["events"], evts)
+      }
+      parent = to_string(.parent_span_id) ?? ""
+      if parent != "" {
+        span = set!(span, ["parentSpanId"], parent)
+      }
+      . = {
+        "resourceSpans": [{
+          "resource": {"attributes": res_attrs},
+          "scopeSpans": [{
+            "scope": {"name": "librerun-obs-forward"},
+            "spans": [span]
+          }]
+        }]
+      }

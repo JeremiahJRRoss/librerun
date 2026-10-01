@@ -1,0 +1,86 @@
+LibreRun
+
+Copyright © 2026 Jeremiah Ross, to the extent copyright subsists in
+first-party material and such copyright is owned by Jeremiah Ross. No
+copyright is claimed in AI-generated material that is not eligible for
+copyright protection under applicable law.
+
+To the extent copyright subsists, copyrightable first-party material
+owned by Jeremiah Ross is licensed under AGPL-3.0-only.
+
+AGPL-3.0-only is the GNU Affero General Public License, version 3 only.
+Its text is in LICENSE, and again in LICENSES/AGPL-3.0-only.txt.
+
+These four directories are licensed under Apache-2.0 instead (the
+Apache License, Version 2.0, in LICENSES/Apache-2.0.txt), so that the
+parts an agent imports or starts from carry no copyleft of their own.
+The SDK, the templates and the examples cross a process boundary into
+the agent's own program; the adapters are Apache-2.0 as their own text
+and run inside a LibreRun process, importing its protocol module, and
+whether an agent the chassis runs in-process takes on the AGPL is the
+licence's question, which this notice does not settle:
+
+    sdk/
+    backend/adapters/
+    cli/src/librerun/templates/
+    backend/agents/_examples/
+
+docs/release/License_Scope_Map.md says which licence applies to which
+path, and why; REUSE.toml is the same map in machine-readable form.
+
+-----------------------------------------------------------------------
+Third-party material in this repository
+-----------------------------------------------------------------------
+
+Third-party material keeps its own licence, copyright and notices, and
+nothing in this file relicenses it.
+
+  * backend/alembic/README and backend/alembic/script.py.mako, and the
+    parts of backend/alembic.ini and backend/alembic/env.py that Alembic
+    generated, come from Alembic:
+        Copyright 2009-2026 Michael Bayer.
+    They are under the MIT License, whose text is in LICENSES/MIT.txt.
+
+  * CODE_OF_CONDUCT.md is adapted from the Contributor Covenant, version
+    2.1, under the Creative Commons Attribution 4.0 International licence
+    (LICENSES/CC-BY-4.0.txt). Its own Attribution section says so.
+
+  * Most of .gitignore comes from GitHub's gitignore templates, which
+    are dedicated to the public domain under CC0 1.0 Universal
+    (LICENSES/CC0-1.0.txt).
+
+-----------------------------------------------------------------------
+Third-party components a build downloads
+-----------------------------------------------------------------------
+
+The Python and npm packages, container images and tools that building
+or running LibreRun downloads are not part of this repository. Each
+keeps its own licence. THIRD_PARTY.md lists them with their versions,
+sources and licences.
+
+-----------------------------------------------------------------------
+Source
+-----------------------------------------------------------------------
+
+LibreRun is distributed as source. The Corresponding Source of a release
+is this repository at that release's tag. If you modify LibreRun and let
+users interact with it over a network, section 13 of the AGPL requires
+you to offer those users the source of your version.
+
+-----------------------------------------------------------------------
+No warranty
+-----------------------------------------------------------------------
+
+LibreRun is provided "as is", without warranty of any kind, express or
+implied. Sections 15 and 16 of the AGPL-3.0-only text state the
+disclaimer of warranty and the limitation of liability in full, and
+sections 7 and 8 of the Apache License 2.0 do the same for the four
+directories under it. Nothing in this repository adds a warranty.
+
+-----------------------------------------------------------------------
+The name
+-----------------------------------------------------------------------
+
+The licence covers the software. It grants no rights in the name
+"LibreRun". TRADEMARKS.md says how the name may be used, including by
+forks.

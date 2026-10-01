@@ -1,0 +1,116 @@
+{
+  "type": "object",
+  "title": "Echo",
+  "required": [
+    "message"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "message": {
+      "type": "string",
+      "title": "Message",
+      "description": "Whatever you type here comes back as the run's structured output.",
+      "minLength": 1,
+      "maxLength": 2000,
+      "x-ui-widget": "textarea"
+    },
+    "mood": {
+      "type": "string",
+      "title": "Mood",
+      "enum": [
+        "cheerful",
+        "deadpan",
+        "verbose"
+      ]
+    },
+    "fetch_and_emit": {
+      "type": "boolean",
+      "title": "Emit an address the agent 'fetched' at runtime",
+      "description": "Stands in for a ticket or a document an agent retrieves after intake: the text never passed through intake, so nothing the chassis redacted on the way in can help. Only the output walk and the export walk keep it out of the database and the exporter. Overrides print / instrument / threads with it."
+    },
+    "redact": {
+      "type": "string",
+      "title": "Ask the chassis to redact this",
+      "description": "Returned as `redacted`: what ctx.pii.redact makes of it.",
+      "maxLength": 500,
+      "x-pii": true
+    },
+    "print": {
+      "type": "string",
+      "title": "Print this line",
+      "description": "The handler print()s it. `docker logs` on the agent stays empty; the line reaches the platform as a record of this invocation.",
+      "maxLength": 500,
+      "x-pii": true
+    },
+    "instrument": {
+      "type": "string",
+      "title": "Put this in the agent's own span",
+      "description": "A custom span named with it, a string attribute, an event, a link attribute, a log record and a bytes attribute \u2014 the agent's OWN instrumentation, exported by its SDK and walked by the relay.",
+      "maxLength": 500,
+      "x-pii": true
+    },
+    "instrument_number": {
+      "type": "integer",
+      "title": "An int64 attribute on that span",
+      "description": "There is no placeholder for a number, so a flagged one strips the span to its identity."
+    },
+    "threads": {
+      "type": "string",
+      "title": "Print this from a thread and a pool job",
+      "description": "Context propagation: both land under this invocation's trace.",
+      "maxLength": 500,
+      "x-pii": true
+    },
+    "sleep_seconds": {
+      "type": "number",
+      "title": "Sleep before answering",
+      "description": "For exercising the phase deadline.",
+      "minimum": 0,
+      "maximum": 600
+    },
+    "store_key": {
+      "type": "string",
+      "title": "run_store key to write",
+      "maxLength": 200
+    },
+    "store_value": {
+      "type": "string",
+      "title": "run_store value to write",
+      "description": "Walked at the boundary like any persisted agent argument.",
+      "maxLength": 500,
+      "x-pii": true
+    },
+    "audit": {
+      "type": "object",
+      "title": "Emit an audit_log row",
+      "description": "The chassis stamps the attribution; the agent cannot.",
+      "properties": {
+        "action_type": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "detail": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+    "show_settings": {
+      "type": "boolean",
+      "title": "Read this agent's settings",
+      "description": "The agent reads its settings as this tenant set them on the agent page's Settings tab (ctx.config.settings(), the MCP config_get tool, which needs no grant) and returns them as `settings`, with the `note` setting as the output's note."
+    },
+    "fetch_secret": {
+      "type": "boolean",
+      "title": "Read this agent's tool secret",
+      "description": "The agent asks for its declared tool secret, echo_token, as this tenant's admin or a platform admin set it on the agent page's Secrets tab (ctx.secrets.get, the MCP secret_get tool, which needs no grant), and returns only `secret_set`: true or false. The value itself never reaches the output."
+    },
+    "ask_model": {
+      "type": "string",
+      "title": "Ask the model (through the gateway)",
+      "description": "A prompt sent through the platform's LLM gateway under this agent's declared `echo` step. The agent names the step, never the model: the admin's configuration for that step decides which model answers. Keyless deployments get the gateway's stub provider, with the same span and cost.",
+      "maxLength": 2000,
+      "x-pii": true
+    }
+  }
+}

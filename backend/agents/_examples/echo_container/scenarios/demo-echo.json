@@ -1,0 +1,9 @@
+{
+  "name": "Demo: echo roundtrip",
+  "description": "Submits a message through the generic intake, gets it echoed back by the container over Run Contract v1, and asks the model one question through the gateway \u2014 so this card's sample produces a costed LLM span like every other card's.",
+  "user_inputs": {
+    "message": "Hello from the Run Contract v1 demo scenario.",
+    "mood": "cheerful",
+    "ask_model": "In one sentence: what is a Run Contract agent?"
+  }
+}

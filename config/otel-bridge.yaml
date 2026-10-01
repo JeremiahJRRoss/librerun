@@ -1,0 +1,52 @@
+# ============================================================================
+# LibreRun — OTLP protobuf bridge for the Cribl overlay
+#
+# Why this exists: Cribl's OpenTelemetry source accepts BINARY PROTOBUF
+# only — over HTTP it answers OTLP/JSON with a 501 ("unsupported
+# Content-Type"; Cribl KB otlp-96/2135) — and Vector has no OTLP
+# protobuf encoder (its native `opentelemetry` sink is unusable for
+# traces, per the note in vector.yaml's sink gallery). This bridge is a
+# stock OpenTelemetry Collector doing exactly one spec-defined job:
+#
+#   vector (cribl_traces sink, OTLP/JSON over HTTP, in-network)
+#     --> this bridge :4318 /v1/traces
+#     --> OTLP gRPC + protobuf + TLS --> Cribl OTel source (:4317, gRPC)
+#
+# Configure the Cribl source with Protocol: gRPC (its default). The
+# protobuf wire format is name-free, so Cribl's 0.10.0 OTLP-version
+# setting parses modern payloads fine — the JSON-era scopeSpans /
+# instrumentationLibrarySpans naming problem does not exist on this
+# path — and "Extract spans" applies to real parsed spans.
+#
+# Runs only with the `cribl` compose profile; never publishes a port —
+# the only listener is on the compose network.
+# ============================================================================
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+exporters:
+  otlp:
+    # gRPC target of the Cribl OTel source, canonical host:port form —
+    # no path (gRPC has none) and no scheme needed (TLS is the
+    # collector's default for this exporter):
+    #   default.main.<org>.cribl.cloud:4317
+    # A scheme-ful value also works: the collector strips http(s)://
+    # and `https` forces TLS (otlpexporter README).
+    endpoint: ${env:CRIBL_OTLP_ENDPOINT}
+    headers:
+      # A source with auth disabled ignores the header, so an unset
+      # token is safe.
+      authorization: "Bearer ${env:CRIBL_OTLP_TOKEN}"
+
+service:
+  telemetry:
+    logs:
+      level: warn
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [otlp]

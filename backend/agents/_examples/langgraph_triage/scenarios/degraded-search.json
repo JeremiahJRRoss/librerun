@@ -1,0 +1,10 @@
+{
+  "name": "Demo: search is slow but nothing is failing",
+  "description": "The counterpart to the outage scenario, and the case that shows why the classify step calls a model at all. The node's keyword rule reads this report as 'high' \u2014 it matches the word 'errors' in the sentence 'nothing errors', which says the opposite. A model reading the sentence should answer 'medium'. Run it keyless and you get the rule's answer back, labelled severity_source=stub-fixture, because the agent hands the gateway its own fixture and the gateway says it was the stub that replied; configure a provider key and you get the model's answer, labelled severity_source=model. Either way the severity is not 'critical', which is what the stub would synthesise on its own: a fixture is never passed off as a judgement, and the label is read from the reply rather than assumed.",
+  "user_inputs": {
+    "title": "Search results are slow on the catalogue page",
+    "service": "catalogue-search",
+    "description": "Since this morning the catalogue search takes 4-6 seconds instead of under one. Results are correct and nothing errors; it is intermittent and clears on a retry. Support has had a handful of complaints, no escalations.",
+    "logs": "09:14:51 WARN  catalogue-search query took 5231ms (p99 budget 900ms)\n09:15:02 WARN  catalogue-search index shard 3 lagging replica by 40s\n09:15:30 INFO  catalogue-search cache hit ratio 0.31 (was 0.88)"
+  }
+}

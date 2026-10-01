@@ -1,0 +1,167 @@
+# LibreRun LangGraph adapter — resolved dependency lock. DO NOT EDIT BY HAND.
+#
+# Why this is a SECOND lock rather than rows in backend/requirements.lock.txt:
+# the image installs the adapter, but `chassis-zero-agents` deliberately runs
+# with LangGraph absent — test_adapter_kit.py exists to prove the battery
+# degrades correctly without it. Folding langgraph into the chassis lock would
+# install it everywhere that lock is used and quietly destroy that premise.
+#
+# Resolved under --constraint ../requirements.lock.txt, so every package the
+# two locks share is pinned to the same version and installing both is
+# consistent. The adapter itself is not in here; the image installs it from
+# the local path with --no-deps, so this file is the whole of its dependency
+# closure.
+#
+# Regenerate with scripts/lock_requirements.sh, which rebuilds both locks in
+# the right order.
+annotated-types==0.8.0
+    # via
+    #   -c requirements.lock.txt
+    #   pydantic
+anyio==4.15.1
+    # via
+    #   -c requirements.lock.txt
+    #   httpx
+    #   httpx2
+    #   langsmith
+certifi==2026.7.22
+    # via
+    #   -c requirements.lock.txt
+    #   httpcore
+    #   httpx
+    #   requests
+charset-normalizer==3.5.1
+    # via
+    #   -c requirements.lock.txt
+    #   requests
+distro==1.9.0
+    # via langsmith
+h11==0.16.0
+    # via
+    #   -c requirements.lock.txt
+    #   httpcore
+    #   httpcore2
+httpcore==1.0.9
+    # via
+    #   -c requirements.lock.txt
+    #   httpx
+httpcore2==2.13.0 ; sys_platform != 'emscripten'
+    # via httpx2
+httpx==0.28.1
+    # via
+    #   -c requirements.lock.txt
+    #   langchain-core
+    #   langgraph-sdk
+httpx2==2.13.0
+    # via langsmith
+httpx2-jsfetch==1.0 ; sys_platform == 'emscripten'
+    # via httpx2
+idna==3.19
+    # via
+    #   -c requirements.lock.txt
+    #   anyio
+    #   httpx
+    #   httpx2
+    #   requests
+jsonpatch==1.33
+    # via langchain-core
+jsonpointer==3.1.1
+    # via jsonpatch
+langchain-core==1.6.3
+    # via
+    #   langgraph
+    #   langgraph-checkpoint
+    #   langgraph-prebuilt
+langchain-protocol==0.0.19
+    # via langchain-core
+langgraph==1.2.2
+    # via librerun-langgraph (adapters/pyproject.toml)
+langgraph-checkpoint==4.2.0
+    # via
+    #   langgraph
+    #   langgraph-prebuilt
+langgraph-prebuilt==1.1.0
+    # via langgraph
+langgraph-sdk==0.3.15
+    # via langgraph
+langsmith==0.12.5
+    # via langchain-core
+opentelemetry-api==1.44.0
+    # via
+    #   -c requirements.lock.txt
+    #   librerun-langgraph (adapters/pyproject.toml)
+orjson==3.12.0
+    # via
+    #   -c requirements.lock.txt
+    #   langgraph-sdk
+    #   langsmith
+ormsgpack==1.12.2
+    # via langgraph-checkpoint
+packaging==26.3
+    # via
+    #   -c requirements.lock.txt
+    #   langchain-core
+    #   langsmith
+pydantic==2.13.5
+    # via
+    #   -c requirements.lock.txt
+    #   langchain-core
+    #   langgraph
+    #   langsmith
+pydantic-core==2.46.5
+    # via
+    #   -c requirements.lock.txt
+    #   pydantic
+pyyaml==6.0.3
+    # via
+    #   -c requirements.lock.txt
+    #   langchain-core
+requests==2.34.2
+    # via
+    #   -c requirements.lock.txt
+    #   langsmith
+    #   requests-toolbelt
+requests-toolbelt==1.0.0
+    # via langsmith
+sniffio==1.3.1
+    # via langsmith
+tenacity==9.1.4
+    # via langchain-core
+truststore==0.10.4 ; sys_platform != 'emscripten'
+    # via
+    #   httpcore2
+    #   httpx2
+typing-extensions==4.16.0
+    # via
+    #   -c requirements.lock.txt
+    #   anyio
+    #   httpx2
+    #   langchain-core
+    #   langchain-protocol
+    #   langsmith
+    #   opentelemetry-api
+    #   pydantic
+    #   pydantic-core
+    #   typing-inspection
+typing-inspection==0.4.4
+    # via
+    #   -c requirements.lock.txt
+    #   pydantic
+urllib3==2.8.0
+    # via
+    #   -c requirements.lock.txt
+    #   requests
+uuid-utils==0.17.1
+    # via
+    #   langchain-core
+    #   langsmith
+websockets==17.1
+    # via
+    #   -c requirements.lock.txt
+    #   langsmith
+xxhash==4.0.1
+    # via
+    #   langgraph
+    #   langsmith
+zstandard==0.25.0
+    # via langsmith

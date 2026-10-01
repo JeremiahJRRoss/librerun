@@ -1,0 +1,364 @@
+# The documentation is held to the tree, not to a promise (blueprint S8).
+#
+# Three jobs and FOUR gates — the link check and the table check share
+# one job because both read the same tracked Markdown surface — and each
+# is negative-tested in the same job: the violation it exists to catch
+# is injected, the gate must go red, the injection is reverted. On a
+# clean tree a broken checker and a working
+# one are indistinguishable, so "it passed" is not evidence until it has
+# also been made to fail (CLAUDE.md).
+#
+# Every probe captures the checker's output into a variable and then
+# matches it with NO PIPE. `cmd | grep -q` under `set -o pipefail`
+# reports the CHECKER's exit status, not the grep's — so a probe
+# written that way reads "the gate stayed green" precisely when the
+# gate worked, and fails the build for succeeding. Found by writing it
+# the wrong way first.
+#
+# Capturing is not on its own enough, and this comment used to say it
+# was. `printf '%s' "$out" | grep -q …` is still a pipe: `grep -q`
+# exits at the first match, `printf` takes the SIGPIPE instead of the
+# external command, and `pipefail` reports that. Measured at 11 MB
+# with the match at the start: exit 141, which is 128 + SIGPIPE. The
+# six probes that carried it at the time passed only because their
+# output was small, which is luck rather than a design. Every probe
+# uses a here-string now — no pipe, no producer to kill — and
+# `backend/tests/test_workflow_grep_pipelines.py` refuses the piped
+# form in any step under pipefail (issue #81).
+#
+# There is deliberately no `paths:` filter. The first job reads the
+# WHOLE tracked Markdown surface — every tracked `*.md`, for links and
+# for table shape — the second reads the README against the CLI's own
+# parser, and the third re-derives the API document from the live app,
+# so any filter narrow enough to be worth writing would be a hole: a
+# rename three directories away breaks a link here, and a route added in
+# one router changes the spec. The two cheap jobs cost seconds; the
+# third costs what every job that loads the chassis costs.
+name: docs
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------- 1
+  link-check:
+    name: Every relative link resolves
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # No dependencies on purpose: the checker is standard library and
+      # never touches the network, so it cannot fail for somebody else's
+      # outage. What it checks is the half that is ours and that rots —
+      # paths inside this repository and the anchors they point at.
+      - name: The checker's scope, for the record
+        run: python3 scripts/check_links.py --list
+
+      - name: Every relative link in every tracked Markdown file resolves
+        run: python3 scripts/check_links.py
+
+      # Negative test 1 — docs/release/ is really in scope. The S8
+      # acceptance names that directory, and a directory is a string in
+      # a glob: get it wrong and the positive check above still passes,
+      # because it passes on everything it cannot see. Injected into a
+      # TRACKED file, because `git ls-files` is the scope and an
+      # untracked probe would be invisible to it — which is exactly how
+      # a negative test comes back green while proving nothing.
+      #
+      # The probe file is the beta's announcement, which lives in
+      # docs/release/ for good.
+      - name: The gate bites inside docs/release/
+        run: |
+          set -euo pipefail
+          printf '\n[a link the S8 probe injected](./no-such-file.md)\n' >> docs/release/v1.1.0-beta.1.md
+          out="$(python3 scripts/check_links.py || true)"
+          git checkout -- docs/release/v1.1.0-beta.1.md
+          if grep -q "docs/release/v1.1.0-beta.1.md" <<< "$out"; then
+            echo "the gate caught the break in docs/release/"
+          else
+            echo "::error::A broken link in docs/release/v1.1.0-beta.1.md did not turn the link checker red — that directory is not really in its scope."
+            exit 1
+          fi
+
+      # Negative test 3 — anchors, not only files. A link to a heading
+      # that was renamed is the failure a reorganisation actually
+      # produces, and a checker that only stats files would miss it.
+      - name: The gate bites on a heading that is not there
+        run: |
+          set -euo pipefail
+          printf '\n[a heading the S8 probe invented](docs/platform/Install.md#no-such-heading)\n' >> README.md
+          out="$(python3 scripts/check_links.py || true)"
+          git checkout -- README.md
+          if grep -q "no-such-heading" <<< "$out"; then
+            echo "the gate caught the missing anchor"
+          else
+            echo "::error::A link to a heading that does not exist did not turn the link checker red — anchors are not really being checked."
+            exit 1
+          fi
+
+      # And the exclusion is real: a link shown as an EXAMPLE inside a
+      # fenced block must stay green, or every page that documents
+      # Markdown would fail and the only fix would be to stop checking.
+      - name: A link inside a fenced block stays an example
+        run: |
+          set -euo pipefail
+          printf '\n```markdown\n[an example, not a link](./nowhere.md)\n```\n' >> README.md
+          status=0
+          python3 scripts/check_links.py || status=$?
+          git checkout -- README.md
+          if [ "$status" -ne 0 ]; then
+            echo "::error::The link checker flagged a link inside a fenced code block — it is reading examples as links."
+            exit 1
+          fi
+          echo "a fenced example stays an example"
+
+      # ---- and every table row carries its header's cell count -------
+      #
+      # GFM DROPS CELLS PAST THE HEADER COUNT, SILENTLY. Seventeen rows
+      # of the gap register carried more than their header declared, and
+      # for thirteen of them what the render discarded was the Owner
+      # column — the one that records whether a gap is closed. `H14`
+      # rendered with the status narrative in Owner and its actual owner,
+      # `S5`, nowhere on the page. Nothing in this tree parsed those
+      # files, so a row that rendered wrong had never had anything to
+      # notice it (issue #82).
+      #
+      # Repository-wide by MEASUREMENT, not by preference: across 59
+      # files, 205 tables and 1399 body rows, exactly one file was
+      # ragged. So the rule costs no churn and covers the next file to
+      # grow a table, which a rule scoped to the known offender would
+      # not.
+      - name: Every table row carries its header's cell count
+        run: python3 scripts/check_tables.py
+
+      # Negative test 4 — the gate bites on the shape that started this.
+      # Injected into a tracked table — the third-party component list,
+      # five columns wide — and restored immediately.
+      - name: The gate bites on a row with one cell too many
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import pathlib
+          p = pathlib.Path("THIRD_PARTY.md")
+          lines = p.read_text().splitlines(keepends=True)
+          for i, line in enumerate(lines):
+              if line.startswith("| aiofiles |"):
+                  cells = line.rstrip("\n").strip().strip("|").split("|")
+                  lines[i] = "|" + "|".join(cells[:3] + [" "] + cells[3:]) + "|\n"
+                  break
+          else:
+              raise SystemExit("::error::no aiofiles row to inject into")
+          p.write_text("".join(lines))
+          PY
+          out="$(python3 scripts/check_tables.py || true)"
+          git checkout -- THIRD_PARTY.md
+          if grep -q "row 'aiofiles' has 6 cells" <<< "$out"; then
+            echo "the gate caught the extra cell"
+          else
+            echo "::error::A row with six cells under a five-column header did not turn the table checker red — the shape issue #82 is about is not really being caught."
+            exit 1
+          fi
+
+      # …and the two parser details, which are the whole difficulty. An
+      # escaped pipe is CONTENT: the census that found #82 split on every
+      # `|` at first and accused two already-correct rows. A trailing `|`
+      # is OPTIONAL: assuming one discards the last cell of every row
+      # without it — a parser losing content while measuring a file that
+      # loses content.
+      - name: An escaped pipe and a missing trailing pipe stay correct
+        run: |
+          set -euo pipefail
+          printf '\n| A | B |\n|---|---|\n| the set is `;\\|&<>` | escaped |\n| no trailing pipe | here\n' >> docs/release/v1.1.0-beta.1.md
+          status=0
+          python3 scripts/check_tables.py || status=$?
+          git checkout -- docs/release/v1.1.0-beta.1.md
+          if [ "$status" -ne 0 ]; then
+            echo "::error::The table checker flagged a row whose pipe is escaped, or one with no trailing pipe — both are correct GFM and it is misreading them."
+            exit 1
+          fi
+          echo "an escaped pipe is content, and a trailing pipe is optional"
+
+      # Negative test 6 — the other half of the same bug, which this gate
+      # committed while fixing the first half. Five rows were APPENDED to
+      # the end of the register instead of into its table, so GFM rendered
+      # them as literal text and the row-count check said "clean" — it
+      # counts rows IN tables and those were in none.
+      - name: The gate bites on a row that is in no table
+        run: |
+          set -euo pipefail
+          printf '\n| ZZ9 | a row nothing declares | S1 | ev | target | nobody |\n' >> docs/release/v1.1.0-beta.1.md
+          out="$(python3 scripts/check_tables.py || true)"
+          git checkout -- docs/release/v1.1.0-beta.1.md
+          if grep -q "row 'ZZ9' is in no table" <<< "$out"; then
+            echo "the gate caught the orphaned row"
+          else
+            echo "::error::A table row appended outside every table did not turn the table checker red — rows that render as literal text are not really being caught."
+            exit 1
+          fi
+
+  # ---------------------------------------------------------------- 2
+  readme-walk:
+    name: The README alone is enough (D12)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The CLI is standard library, so it imports off the checkout with
+      # nothing installed — and importing it is the point: a flag the
+      # README shows is checked against the parser that would receive it,
+      # not against a copy of the parser written down here.
+      - name: Every command in the README is a command that exists
+        run: python3 scripts/readme_walk.py
+
+      # The three probes below all mutate a COPY, so nothing is restored
+      # and a failed step cannot leave the checkout dirty.
+      #
+      # Negative test 1 — a step of the walk deleted. This is the whole
+      # reason D3–D6 are checked IN ORDER: the first version of this
+      # checker passed a README with the approval step removed, because
+      # the word "approve" also appears in the list of what 1.0 does not
+      # do, three sections further down.
+      - name: The gate bites when a step of the walk goes missing
+        run: |
+          set -euo pipefail
+          probe="$RUNNER_TEMP/readme-without-the-gate.md"
+          python3 - "$probe" <<'PY'
+          import pathlib, sys
+          text = pathlib.Path("README.md").read_text(encoding="utf-8")
+          assert "→ **Approve** at the gate " in text, "the README no longer walks the gate the probe removes"
+          pathlib.Path(sys.argv[1]).write_text(
+              text.replace("→ **Approve** at the gate ", "→ "), encoding="utf-8")
+          PY
+          out="$(python3 scripts/readme_walk.py --readme "$probe" || true)"
+          if grep -q "cannot be completed" <<< "$out"; then
+            echo "the gate caught the deleted approval step"
+          else
+            echo "::error::A README with the approval step removed from the walk did not turn readme-walk red — D3-D6 are not really being checked in order."
+            exit 1
+          fi
+
+      # Negative test 2 — a flag that does not exist. The failure this
+      # catches is a CLI rename landing without the README following it,
+      # which is how a copy-pasteable command stops being one.
+      - name: The gate bites on a flag the CLI does not have
+        run: |
+          set -euo pipefail
+          probe="$RUNNER_TEMP/readme-with-a-bad-flag.md"
+          python3 - "$probe" <<'PY'
+          import pathlib, sys
+          text = pathlib.Path("README.md").read_text(encoding="utf-8")
+          assert "librerun run --agent my-agent --wait" in text, "the README no longer shows the command the probe edits"
+          pathlib.Path(sys.argv[1]).write_text(
+              text.replace("librerun run --agent my-agent --wait",
+                           "librerun run --agent my-agent --follow"), encoding="utf-8")
+          PY
+          out="$(python3 scripts/readme_walk.py --readme "$probe" || true)"
+          if grep -q "has no flag" <<< "$out"; then
+            echo "the gate caught the flag that does not exist"
+          else
+            echo "::error::A README showing a --follow flag the CLI does not have did not turn readme-walk red."
+            exit 1
+          fi
+
+      # Negative test 3 — a path that does not exist. The failure a docs
+      # reorganisation produces, in the one file most likely to be read
+      # without being tested.
+      - name: The gate bites on a docs path that is not there
+        run: |
+          set -euo pipefail
+          probe="$RUNNER_TEMP/readme-with-a-bad-path.md"
+          python3 - "$probe" <<'PY'
+          import pathlib, sys
+          text = pathlib.Path("README.md").read_text(encoding="utf-8")
+          assert "docs/platform/Security.md" in text, "the README no longer names the page the probe renames"
+          pathlib.Path(sys.argv[1]).write_text(
+              text.replace("docs/platform/Security.md", "docs/platform/Secrets.md"),
+              encoding="utf-8")
+          PY
+          out="$(python3 scripts/readme_walk.py --readme "$probe" || true)"
+          if grep -q "does not exist" <<< "$out"; then
+            echo "the gate caught the path that does not exist"
+          else
+            echo "::error::A README pointing at docs/platform/Secrets.md, which does not exist, did not turn readme-walk red."
+            exit 1
+          fi
+
+  # ---------------------------------------------------------------- 3
+  openapi-drift:
+    name: docs/api/openapi.yaml matches the routes served
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.lock.txt
+
+      # From the lock, like every other job that loads the chassis: the
+      # question here is what THIS tree serves, not what a fresh
+      # resolution would.
+      - name: Install the chassis
+        working-directory: backend
+        run: pip install -r requirements.lock.txt
+
+      # Presidio downloads this model on import if it is absent, so the
+      # step is not extra work — it is the same work, done where a
+      # failure is legible instead of inside an unrelated traceback.
+      - name: The named-entity model
+        run: |
+          python -m spacy download en_core_web_lg
+          python -c "import spacy; spacy.load('en_core_web_lg')"
+
+      - name: The committed document matches the live app
+        run: python3 scripts/export_openapi.py --check
+
+      # Negative test 1 — the committed document edited. Proves the
+      # check compares rather than merely runs.
+      - name: The gate bites when the document is edited
+        run: |
+          set -euo pipefail
+          sed -i 's|^  /api/v1/health:|  /api/v1/health-renamed-by-a-probe:|' docs/api/openapi.yaml
+          if git diff --quiet -- docs/api/openapi.yaml; then
+            echo "::error::The probe edited nothing — /api/v1/health is no longer spelled that way in the document, so this negative test would have proved nothing."
+            exit 1
+          fi
+          status=0
+          python3 scripts/export_openapi.py --check || status=$?
+          git checkout -- docs/api/openapi.yaml
+          if [ "$status" -eq 0 ]; then
+            echo "::error::A renamed path in docs/api/openapi.yaml did not turn the drift check red."
+            exit 1
+          fi
+          echo "the gate caught the edited document"
+
+      # Negative test 2 — the other direction, which is the one that
+      # actually happens: a route added to the app and the document left
+      # behind. Proves the check re-derives from the live app rather
+      # than comparing the file with itself.
+      - name: The gate bites when a route is added and the document is not
+        run: |
+          set -euo pipefail
+          printf '\n\n@app.get("/api/v1/_openapi_drift_probe")\nasync def _openapi_drift_probe():\n    return {}\n' >> backend/app/main.py
+          status=0
+          python3 scripts/export_openapi.py --check || status=$?
+          git checkout -- backend/app/main.py
+          if [ "$status" -eq 0 ]; then
+            echo "::error::A route added to the app did not turn the drift check red — the check is not reading the live app."
+            exit 1
+          fi
+          echo "the gate caught the undocumented route"

@@ -1,0 +1,129 @@
+# ============================================================================
+# LibreRun — Vector Elastic overlay (blueprint S7a, decision L26)
+#
+# Merged on top of vector.yaml + vector-otlp-shape.yaml when
+# LIBRERUN_OBS_VENDOR=elastic:
+#
+#   1. LIBRERUN_OBS_VENDOR=elastic in .env  (the SELECTOR lives in .env,
+#      because compose expands it while building Vector's command line —
+#      an env_file is read by the container, too late for that)
+#   2. the ELASTIC_* values in observability.env
+#   3. ./compose.sh --profile obs up -d
+#      (the `obs` profile starts otel-bridge, which the trace leg needs;
+#       env changes RECREATE containers — a bare `restart` keeps the old
+#       env)
+#
+# Two legs, both planes on each, every hop off the box dialling OUT:
+#
+#   logs   (backend JSONL + OTel log records) --> Elasticsearch data streams
+#          the native `elasticsearch` sink, which POSTs the documented
+#          `_bulk` NDJSON to <endpoint>/_bulk.
+#          ELASTIC_URL       the cluster or Elastic Cloud deployment URL,
+#                            no path (the sink appends /_bulk itself)
+#          ELASTIC_API_KEY   sent as `Authorization: ApiKey <key>`, the
+#                            scheme Elastic documents for API keys. A
+#                            self-managed cluster using basic auth sets
+#                            ELASTIC_AUTH_SCHEME=Basic and puts the
+#                            base64 pair in ELASTIC_API_KEY.
+#          Data stream naming is Elastic's own: logs-<dataset>-<namespace>.
+#          ELASTIC_LOGS_DATASET / ELASTIC_LOGS_NAMESPACE tune it.
+#
+#   traces (every span) --> otel-bridge --> Elastic APM OTLP intake
+#          The sink below posts the wire-shaped OTLP/JSON to the
+#          in-network bridge (config/otel-bridge-elastic.yaml), which
+#          re-exports OTLP PROTOBUF over HTTP to the APM intake — the
+#          endpoint Elastic documents for OTLP/HTTP, /v1/traces on the
+#          APM server or the Elastic Cloud managed OTLP endpoint.
+#          ELASTIC_APM_OTLP_URL   full path, e.g.
+#                                 https://<deployment>.apm.<region>.cloud.es.io/v1/traces
+#          ELASTIC_API_KEY        reused by the bridge as
+#                                 `Authorization: ApiKey <key>`. A
+#                                 self-managed APM server taking a secret
+#                                 token sets ELASTIC_APM_AUTH_SCHEME=Bearer
+#                                 and puts the token in ELASTIC_API_KEY.
+#
+# This overlay FORWARDS; it never redacts. Both planes reach Vector
+# already walked — S4's walkers and the authenticated relay are the only
+# way telemetry enters the box — so redacting again here would only be a
+# second, weaker copy of the one walker.
+#
+# Before forwarding run-plane traces off-box, consider
+# OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=NO_CONTENT in .env:
+# by default those spans carry LLM prompt/completion content.
+# ============================================================================
+
+transforms:
+  # The vendor's reserved service field, lifted from the OTLP resource
+  # where there is one. `otlp.logs` events — container agents through
+  # S4's authenticated relay, the browser ux plane through the RUM relay
+  # — carry their resource under `.resources`; the backend's own JSONL
+  # lines, tailed from ./data/logs, carry none, because the file IS the
+  # backend's and its resource identity is the backend's service name.
+  #
+  # ECS spells it `service.name`, which in JSON is a nested object.
+  # Nothing is removed and `.resources` is not invented: an event that
+  # arrived with one keeps it exactly as Vector holds it, so the
+  # identity a vendor reads is the emitter's own. (The contract test in
+  # .github/workflows/obs-vendors.yml decodes the intake payload and
+  # requires that resource back, which is what makes dropping it fail.)
+  elastic_logs_shape:
+    type: remap
+    inputs:
+      - otlp.logs
+      - backend_logs
+    source: |
+      svc = to_string(.resources."service.name") ?? ""
+      if svc == "" {
+        svc = "${LIBRERUN_OBS_SERVICE_NAME:-librerun-backend}"
+      }
+      .service = {"name": svc}
+
+sinks:
+  elasticsearch_logs:
+    type: elasticsearch
+    inputs:
+      - elastic_logs_shape
+    # No path: the sink appends /_bulk itself. Empty is deliberate — an
+    # overlay selected with nothing configured must fail loudly at
+    # start-up rather than quietly drop the stream.
+    endpoints:
+      - "${ELASTIC_URL:-}"
+    # Pinned rather than probed: `auto` asks the cluster for its version
+    # on every start, which turns a slow or guarded cluster into a
+    # start-up failure in the telemetry router.
+    api_version: v8
+    mode: data_stream
+    data_stream:
+      type: logs
+      dataset: "${ELASTIC_LOGS_DATASET:-librerun}"
+      namespace: "${ELASTIC_LOGS_NAMESPACE:-default}"
+    request:
+      headers:
+        # `ApiKey <key>` is Elastic's documented API-key scheme. Scheme
+        # and credential are separate variables because Vector's env
+        # interpolation does not nest — a cluster on basic auth sets
+        # ELASTIC_AUTH_SCHEME=Basic and puts the base64 pair in
+        # ELASTIC_API_KEY, and changes nothing else here.
+        Authorization: "${ELASTIC_AUTH_SCHEME:-ApiKey} ${ELASTIC_API_KEY:-}"
+
+  elastic_traces:
+    type: http
+    inputs:
+      - obs_otlp_shape
+    # The in-network bridge (compose `obs` profile) — NOT Elastic. It
+    # converts OTLP/JSON to OTLP protobuf and owns the APM intake URL
+    # and its auth header (config/otel-bridge-elastic.yaml).
+    uri: "http://otel-bridge:4318/v1/traces"
+    method: post
+    encoding:
+      codec: json
+    # One OTLP envelope per request: OTLP receivers take a single JSON
+    # document, so batching into an array would be rejected. Fine at
+    # demo/dev volumes; revisit for heavy production span rates.
+    batch:
+      max_events: 1
+    framing:
+      method: newline_delimited
+    request:
+      headers:
+        Content-Type: application/json

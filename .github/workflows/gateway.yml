@@ -1,0 +1,246 @@
+# The LLM gateway's own suite (blueprint S4a). It needs a REAL PostgreSQL
+# and a REAL cache server — Valkey, compose's own, under the `redis` name
+# (L38) — and it would be a much weaker suite without them: the key
+# table's partial unique indexes are what make a rotation atomic, and a
+# run token is a document the chassis writes to the cache. A double for
+# either would prove something about the double.
+#
+# LIBRERUN_REQUIRE_DB=1 turns "no database" from a skip into a failure,
+# so this job cannot pass by running nothing.
+name: gateway
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "services/gateway/**"
+      # `backend/**`, matching the pull_request half below rather than
+      # enumerating a subset. Round 4 added one missing file here and
+      # asked whether the drift between the two halves was itself the
+      # defect; round 5's discovery answered it — five MORE backend files
+      # the gateway suite imports were outside this half while inside the
+      # other. One workflow cannot mean two things by "what I depend on".
+      - "backend/**"
+      - ".github/workflows/gateway.yml"
+      # Read by the gateway suite: compose wiring and the refusal
+      # catalogue it checks the doc against. `gateway.env.example` joined
+      # with K1 — the compose guard counts a setting as delivered when the
+      # example beside an env_file declares it, so that file is now an
+      # input to the check and a change to it must run this job.
+      - "compose.yaml"
+      - "gateway.env.example"
+      - "docs/authoring/LLM_Gateway.md"
+      # Root-level pytest configuration, which no derived rule can
+      # reach: the dependency guard below demands coverage for files
+      # that EXIST, and the hazard here is a file's ADDITION. pytest
+      # resolves its configfile by walking UP from the invocation
+      # directory, so one added at the repo root takes effect for
+      # `cd backend && pytest` while matching no pattern above.
+      # Measured: a root pytest.ini setting `python_files` takes the
+      # backend suite from 1051 collected to 0 — and the job that
+      # would have caught it does not run, on the pull request or on
+      # the push to main. The seven filenames are pytest's own
+      # `config_names`, read out of its compiled code rather than
+      # retyped (Codex round 14). `conftest.py` is the eighth: adding
+      # a root ini moves rootdir from backend/ to the repo root, which
+      # is what makes a root conftest load at all. Measured both ways,
+      # against a conftest known to load, because the first attempt
+      # said "neither" and the positive control said the attempt was
+      # broken.
+      - "pytest.toml"
+      - ".pytest.toml"
+      - "pytest.ini"
+      - ".pytest.ini"
+      - "pyproject.toml"
+      - "tox.ini"
+      - "setup.cfg"
+      - "conftest.py"
+      # `python -m spacy download` runs from the REPOSITORY ROOT, and
+      # `python -m` puts the working directory at the front of sys.path
+      # ahead of site-packages — so a `spacy.py` committed at the root
+      # replaces the program that step meant to run. Watching the path
+      # makes this job RUN on the commit that adds it; it does NOT stop
+      # the shadow being imported, which is why the suite step above uses
+      # the console script instead and why the assertion below exists
+      # (Codex rounds 15 and 16). This one keeps the path because the
+      # model download has no console-script equivalent here, and because
+      # its consequence IS caught downstream: "The redactor really has
+      # its NER stage" fails if the model did not arrive.
+      #
+      # Derived, not hand-picked: the guard in test_adapter_kit.py
+      # computes these from the `python -m` commands themselves, so one
+      # added to any workflow later is covered the day it lands — and
+      # `pytest.py` correctly left this list when the suite step stopped
+      # using the module form.
+      - "spacy.py"
+      - "spacy/**"
+      # The shared "the suite RAN" assertion this job now calls. It
+      # lives outside every pattern above, so without this line a pull
+      # request weakening the one rule all these jobs rely on would skip
+      # them all and merge unexercised — the same trap round 3 found in
+      # unit-suites when the assertion was extracted from it.
+      - "scripts/assert_suite_ran.py"
+  pull_request:
+    paths:
+      - "services/gateway/**"
+      - "backend/**"
+      - ".github/workflows/gateway.yml"
+      - "compose.yaml"
+      # `gateway.env.example` — see the push half above.
+      - "gateway.env.example"
+      - "docs/authoring/LLM_Gateway.md"
+      # Root-level pytest configuration — see the push half above.
+      - "pytest.toml"
+      - ".pytest.toml"
+      - "pytest.ini"
+      - ".pytest.ini"
+      - "pyproject.toml"
+      - "tox.ini"
+      - "setup.cfg"
+      - "conftest.py"
+      # Module shadows for `python -m` at the root — see the push half.
+      - "spacy.py"
+      - "spacy/**"
+      - "scripts/assert_suite_ran.py"
+
+permissions:
+  contents: read
+
+jobs:
+  gateway:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: docker.io/library/postgres:16@sha256:1a6ab3f5345eb6dbe04a1349529caabdb0ab09293a09590fad07b2246bfa4b54
+        env:
+          POSTGRES_USER: librerun
+          POSTGRES_PASSWORD: ci_only_throwaway
+          POSTGRES_DB: librerun
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U librerun -d librerun"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+      redis:
+        image: docker.io/valkey/valkey:8-alpine@sha256:081c2f5cb575efc901aa80ff9cdbd1ec6a301682fd35e1ebb4b0990a4a4a8507
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql+asyncpg://librerun:ci_only_throwaway@localhost:5432/librerun
+      REDIS_URL: redis://localhost:6379/0
+      PGURL: postgresql://librerun:ci_only_throwaway@localhost:5432/librerun
+      LIBRERUN_REQUIRE_DB: "1"
+      LOG_STDERR_ENABLED: "false"
+      PYTHONPATH: ${{ github.workspace }}/services/gateway:${{ github.workspace }}/backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: services/gateway/requirements.lock.txt
+
+      - name: Install the gateway's lock, and nothing else
+        # What the image installs (A3): the hashed lock, alone. The gateway
+        # imports pii_service and S4's export walkers from backend/app,
+        # which is the sharing the image does, and the lock carries what
+        # they need. A module the gateway imports without declaring it
+        # fails here, as it would in the image, instead of passing on the
+        # backend's list (K7-12): declare it, and relock.
+        run: pip install --require-hashes -r services/gateway/requirements.lock.txt
+
+      - name: The spaCy model Presidio's NER stage needs
+        # Without it the redactor's regex stages still run, so a missing
+        # model would quietly WEAKEN the outbound redaction rather than
+        # fail it — and the totality test would still pass. Fail here
+        # instead.
+        run: |
+          python -m spacy download en_core_web_lg
+          python -c "import spacy; spacy.load('en_core_web_lg')"
+
+      - name: Load the schema the gateway reads
+        run: psql "$PGURL" -v ON_ERROR_STOP=1 -q -f backend/db/schema.sql
+
+      - name: The gateway suite
+        # `pytest`, NOT `python -m pytest`. Only the module form puts the
+        # working directory at the front of sys.path, and this step runs
+        # from the repository ROOT — so a `pytest.py` committed there
+        # replaced the program this step meant to run. Measured, against
+        # this exact command: with the shadow present `python -m pytest`
+        # is rc=0 collected=0 while the console script is rc=0
+        # collected=1253, and without it both forms are 1253 passed. The
+        # console script resolves from PATH, so it cannot be captured by
+        # a file in the directory it happens to be invoked from.
+        #
+        # Watching the path was NOT enough and that was the round-15
+        # mistake: a filter only decides whether the job RUNS. It cannot
+        # stop the shadow from being imported once it does, so the job
+        # ran, collected nothing, and went green — the failure this batch
+        # exists to close, reintroduced by the fix for it (Codex round
+        # 16). Prevention here, detection in the step below; they cover
+        # different sets, so both.
+        run: pytest services/gateway/tests -q -rs --junitxml=gateway-suite.xml
+
+      - name: The gateway suite must have RUN, not shrunk
+        # The same shared assertion unit-suites uses, at a baseline
+        # measured from this job's own CI run on 8450c03 (1253 passed),
+        # not from a local guess. 1276 was that plus S4c's seven and K1's
+        # sixteen, re-measured on the MERGE RESULT: K1 merged while S4c's
+        # branch was open without raising the floor for its own, and a
+        # floor never complains about being too low.
+        #
+        # S4c's seven are that process's half of the detector policy —
+        # the gateway runs the chassis's own `pii_service`, so its
+        # readiness, /healthz's report of it and the outbound refusal
+        # cannot be proven by asking the backend.
+        #
+        # 1313 is S5-R and K2 on top of it, re-measured the same way — on
+        # the merge result, not on any one side. S5-R's fifteen are ten
+        # two-tenant cases over the three container examples and five
+        # that pin what a shipped example may put on the wire.
+        #
+        # 1337 is K7, provider keys from the UI, over the 1316 this job
+        # reported on `main` before it (the floor had stayed at 1313): the
+        # eleven of `test_provider_store.py`, the six of
+        # `test_gateway_rewrap.py`, the two of `test_gateway_requirements.py`
+        # and two in `test_compose_reaches_the_gateway.py`, where the
+        # gateway's store key joins the provider keys no `environment:`
+        # line may carry.
+        run: python3 scripts/assert_suite_ran.py gateway-suite.xml 1337 gateway
+
+      - name: The redactor really has its NER stage
+        # The negative test for the step above: the totality test passes
+        # on regex alone, so a job that silently lost Presidio would look
+        # green while shipping names to a provider.
+        run: |
+          python - <<'PY'
+          import sys
+          sys.path[:0] = ["backend", "services/gateway"]
+          from app.services import pii_service
+
+          # `_get_presidio()` returns a PAIR, and a tuple is never None —
+          # so this read `assert (None, None) is not None` and could not
+          # fail. Blueprint S4c gave the module a state to ask instead,
+          # and the state is measured by a probe rather than by the
+          # constructor alone.
+          status = pii_service.warm_detector(force=True)
+          assert status.state == "ready", (
+              "Presidio is not available — the outbound redaction would run "
+              f"on regex alone and the suite would not notice (state="
+              f"{status.state}, error={status.error})"
+          )
+          redacted, applied = pii_service.redact("call Dana Whitfield tomorrow", quiet=True)
+          assert "Dana" not in redacted, (
+              f"the NER stage did not fire: {redacted!r}"
+          )
+          print("presidio NER active:", [r.pii_type for r in applied])
+          PY

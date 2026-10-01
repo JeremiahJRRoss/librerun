@@ -1,0 +1,68 @@
+# Pinned (gap H6): the transaction boundary in app/middleware_transaction.py
+# and the dependency-teardown semantics it relies on were verified on this
+# exact version. FastAPI has changed WHEN a yield dependency's exit code
+# runs twice (0.106, 0.118); bump deliberately, with the H6 tests green.
+fastapi==0.141.1
+uvicorn[standard]
+sqlalchemy[asyncio]
+asyncpg
+alembic
+pydantic[email]
+pydantic-settings
+python-jose[cryptography]
+# The encrypted secrets store (K6, D14): MultiFernet seals every secret set
+# in the admin UI. Declared rather than reached through python-jose's
+# extra, because the store depends on it and python-jose does not promise
+# to; the floor is the version the lock already held.
+cryptography>=48.0.1
+passlib[bcrypt]
+bcrypt<4.1
+httpx
+# No provider SDK here, on purpose (blueprint S4a, L23): this process is
+# shared by every python-package agent, so a provider client and the
+# credential it needs would be readable by all of them. Model calls go
+# to the gateway over HTTP; services/gateway/requirements.txt is where
+# litellm and the provider surface live.
+python-multipart
+aiofiles
+structlog
+pyyaml
+jsonschema
+redis[hiredis]
+presidio-analyzer
+presidio-anonymizer
+spacy
+tavily-python
+pinecone
+google-auth
+msal
+jinja2
+weasyprint
+# Telemetry — capped below the next major.
+#
+# An open upper bound is not a style question here; it is how a deployment
+# broke. `anthropic>=0.39` with no ceiling let a routine image rebuild
+# resolve a new major that had removed parameters the caller passed, and
+# every Anthropic-backed step died before it built a request. That SDK now
+# lives in services/gateway/requirements.txt (S4a, L23), but the exposure
+# was never about that one package: it was about an unbounded range in an
+# image that gets rebuilt. Everything below was unbounded above.
+#
+# `openinference-instrumentation>=0.1.40` is the same shape the anthropic
+# entry had — a floor two majors below what it resolves.
+#
+# The opentelemetry contrib packages version as 0.NNbM / NbM, tracking the
+# core 1.x line rather than each other, so their ceilings differ and are not
+# a typo. Neither publishes a stable release, which is why a prerelease
+# satisfies each range.
+#
+# Lift a ceiling deliberately, one at a time, with the backend suite green
+# against the new version — never as a rider on an unrelated change.
+opentelemetry-api<2
+opentelemetry-sdk<2
+opentelemetry-instrumentation-fastapi<1
+openinference-instrumentation>=0.1.40,<1
+openinference-semantic-conventions>=0.1.9,<1
+pytest
+pytest-asyncio
+opentelemetry-exporter-otlp<2

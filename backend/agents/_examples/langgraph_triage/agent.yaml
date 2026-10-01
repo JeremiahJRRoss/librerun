@@ -1,0 +1,106 @@
+# Example adapter agent (blueprint B16): a compiled LangGraph graph
+# running as a LibreRun agent. Lives under _examples/ so the underscore
+# keeps it out of default discovery — the shipped demo stays VITA-only.
+# Run it alongside VITA with:
+#   LIBRERUN_AGENTS_PATH=agents/_examples
+manifest_version: 1
+
+id: langgraph-triage
+name: LangGraph Triage (example)
+description: >-
+  Example adapter agent: a compiled LangGraph graph triages an incident
+  report, then drafts the first things a responder should do. Two
+  of its nodes call a model through the platform gateway, so the run
+  produces costed LLM spans and the models are retargetable from the
+  admin page; both fall back to a deterministic rule if the call fails,
+  and both ship their own keyless fixture, so the example still runs
+  with no provider key anywhere.
+
+# The badge on the agent card (blueprint S7): a label, nothing the
+# chassis dispatches on.
+framework: langgraph
+runtime: python-package
+
+# Two phases, mapped by the adapter onto two compiled graphs. The gate
+# on the second phase is the chassis', not the graph's: LangGraph never
+# sees the approval, which is the point of mapping phases rather than
+# asking a framework to model human review.
+#
+# Each phase lists the progress rows the adapter emits — one per graph
+# node, id `phase:node` — with the label the run page shows (blueprint
+# S7). Those ids are NOT this agent's LLM step ids (`classify`, `draft`
+# below), so the page cannot say which model answered a row: it says
+# "on the trace" and links there instead (gap E5, v1.1's explicit
+# association).
+phases:
+  - name: analyze
+    steps:
+      - id: "analyze:classify"
+        label: Classify the incident
+      - id: "analyze:summarise"
+        label: Summarise the triage
+  - name: investigate
+    approval: true
+    steps:
+      - id: "investigate:gather_context"
+        label: Gather context from the knowledge base
+      - id: "investigate:draft"
+        label: Draft the responder's first steps
+
+output:
+  mode: structured
+
+# `gather_context` reads `kb` through the per-run façade and `classify`
+# and `draft` call `llm`; each node checks `caps.granted(...)` first and
+# degrades to a stated absence, so the example runs anywhere.
+#
+# `llm` is not optional once `llm.steps` exist below: the façade raises
+# `CapabilityNotGranted` for an ungranted member, and the gateway answers
+# `403 llm_not_granted` whatever the manifest declares — the manifest
+# loader refuses the combination outright (`_check_llm_grant`).
+capabilities: [kb, llm]
+
+# The two model calls this agent makes. Every value here is a DEFAULT:
+# the tenant's admin configuration overrides provider, model,
+# temperature, max_tokens and timeout per step at request time (L25,
+# D13), which is why changing a model needs no redeploy. A step id the
+# gateway does not find here is refused (`400 unknown_step`).
+llm:
+  steps:
+    - id: classify
+      label: "Severity and signals from the incident report"
+      description: >-
+        Reads the report and returns a severity with the signals that
+        justify it. The node's own keyword scan is the fallback when no
+        model answers, and the keyless fixture — a fallback, NOT a floor:
+        a model that answers may revise the rule in either direction, and
+        the degraded-search scenario ships because the rule reads that
+        report too HIGH.
+      provider: "openai"
+      model: "gpt-4o-mini"
+      temperature: 0.0
+      max_tokens: 400
+      timeout_seconds: 30
+    - id: draft
+      label: "The responder's first steps"
+      description: >-
+        Turns the triage and any knowledge-base context into concrete
+        next steps. Falls back to a fixed checklist.
+      provider: "openai"
+      model: "gpt-4o-mini"
+      temperature: 0.2
+      max_tokens: 600
+      timeout_seconds: 30
+
+scenarios: scenarios
+
+ui:
+  intake:
+    steps:
+      - title: What broke
+        fields: [title, service]
+      - title: Impact
+        fields: [description]
+      - title: Evidence
+        description: Log content is redacted before it is stored.
+        fields: [logs]

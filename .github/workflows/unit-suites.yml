@@ -1,0 +1,1320 @@
+# The two largest suites in the tree, neither of which CI has ever run
+# (blueprint S5-0).
+#
+# Measured on main at eb3f2e2 before this file existed:
+#
+#   backend   1024 tests collected; CI named six files covering 168 of
+#             them across adapter-battery, chassis-zero-agents and
+#             database-parity. 856 had never run in CI.
+#   frontend  6 test files, 65 tests, plus `next build`. NOTHING ran
+#             them — no workflow mentions npm, vitest or next.
+#
+# So the chassis suite was witnessed only by whoever remembered to run it
+# locally, and a contributor's pull request could go green on every check
+# in the repo while breaking it. That is the CLAUDE.md failure mode
+# stated exactly: a gate that reports success by not looking.
+name: unit-suites
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - "frontend/**"
+      - ".github/workflows/**"
+      # Both jobs certify their reports with this script, and it lives
+      # outside every pattern above. Round 2 put it there: while the
+      # assertion was inline in this file `.github/workflows/**` covered
+      # it, and extracting it moved it out of its own trigger's reach —
+      # so a pull request weakening the shared guard would skip both
+      # suites and merge unexercised (Codex round 3). An identity holds
+      # only while its precondition does.
+      - "scripts/assert_suite_ran.py"
+      # The backend suite READS the gateway's pair and its Dockerfile
+      # (A3): test_requirements_lock.py holds the lock to its source, every
+      # pin to its hashes and the image to the lock alone, so a pull request
+      # touching only one of them must run the suite that checks it.
+      - "services/gateway/requirements.txt"
+      - "services/gateway/requirements.lock.txt"
+      - "services/gateway/Dockerfile"
+      # The backend suite IMPORTS the refresh script, and through it the
+      # guard, and the script writes THIRD_PARTY.md's image rows (A3):
+      # test_refresh_image_digests.py holds the procedure R14's digests
+      # move by, so a pull request touching only one of them must run the
+      # suite that checks it. Found by the dependency guard.
+      - "scripts/refresh_image_digests.py"
+      - "scripts/check_dependency_identity.py"
+      - "THIRD_PARTY.md"
+      # The backend suite READS this page: the CLI test asserts that
+      # `--timeout`, which the guide tells authors to raise, exists on
+      # the parser. That coupling is the point of the test, so a pull
+      # request editing only the page must run the job that checks it —
+      # otherwise the claim and the flag can drift apart with a green
+      # board. Found by the dependency guard, not by review.
+      - "docs/authoring/Container_Agents.md"
+      # Same coupling, found the same way: the example suite asserts that
+      # every `node:` event the LangGraph quickstart shows is a node the
+      # example actually declares. Without this path a pull request could
+      # rename a node in the page alone and merge green, which is the
+      # defect the guard exists to catch, skipped rather than passed.
+      # (The page moved to docs/authoring/ at S6.)
+      - "docs/authoring/LangGraph.md"
+      # The CLI and its templates (blueprint S6): the backend suite
+      # imports `cli/src/librerun` off sys.path and renders every
+      # template through the chassis's own manifest loader and both
+      # batteries, so a template edited alone must run the job that
+      # checks it.
+      - "cli/**"
+      # The manifest field reference and its generator: the suite
+      # regenerates the page from the models and fails when the
+      # committed one differs, so an edit to either alone must run it.
+      - "scripts/export_manifest_reference.py"
+      - "docs/authoring/Manifest.md"
+      # Read by the CLI suite: the hour path's commands must be commands
+      # the parser accepts.
+      - "docs/authoring/Quickstart.md"
+      # The other three pages `tests/test_authoring_pages_match_the_gateway.py`
+      # reads (blueprint S4b). It holds all four to what S4a shipped —
+      # the pre-S4a phrases absent, the gateway and the run-token header
+      # present — so a pull request that puts "an agent holds its own
+      # keys" back into one page alone must run the job that catches it.
+      # The dependency guard named two of the three; `Agents_Design.md`
+      # is here because the rule governs it just as literally, and the
+      # guard reads pathlib joins rather than the tuple the module
+      # iterates. Covering only what a heuristic can see is how a filter
+      # gets a hole the next reader cannot explain.
+      - "docs/authoring/Agents_Design.md"
+      - "docs/authoring/Run_Contract_v1.md"
+      - "docs/authoring/SDK.md"
+      # Cross-tree inputs the chassis suite READS rather than imports —
+      # each a pathlib join inside a test, so no import walker would ever
+      # see them. Measured by censusing the suite (Codex round 5 named
+      # three; there are seven).
+      #
+      # The two env examples joined with K1: Gate P
+      # (`backend/tests/test_secret_partition.py`) reads `.env.example`
+      # to assert the root file declares no provider key, and
+      # `gateway.env.example` as the declaration of what the gateway's
+      # env_file delivers. Without these lines a pull request putting a
+      # provider key back into `.env.example` would not run the job that
+      # catches it — the gate would report success by not running.
+      - ".env.example"
+      - "gateway.env.example"
+      # The other two env examples, and the router configs, joined with
+      # K4: `backend/tests/test_env_example_classes.py` reads every
+      # committed `*.env.example` and every `config/*.yaml`, and holds
+      # them to "each variable anything reads is written down in exactly
+      # one file under exactly one class". Without these lines a pull
+      # request that adds a variable to a Vector overlay, or moves a
+      # token between the two observability files, would not run the job
+      # that checks it — the classes gate would report success by not
+      # running, which is the shape this file already documents twice.
+      - "observability.env.example"
+      - "observability-traces.env.example"
+      - "config/**"
+      # …and docs/platform/Install.md, whose four class tables the same gate holds
+      # to those files line for line. A row edited alone must run the job
+      # that compares it.
+      - "docs/platform/Install.md"
+      # …and the gateway's settings model, which the same gate IMPORTS to
+      # derive what that process reads. Not a pathlib join this time: a
+      # real import of a sibling service, put on sys.path the way
+      # conftest.py puts the SDK there, so it is invisible to a filter
+      # that thinks the backend suite lives under backend/. Named by
+      # file rather than by `services/gateway/**`, which would run this
+      # 20-minute job on every gateway change; the derived guard in
+      # test_adapter_kit.py demands the next import's path in turn, so
+      # precision here costs nothing later. It found this one.
+      - "services/gateway/gateway/config.py"
+      - "agents.compose.yaml"
+      - "compose.sh"
+      - "compose.yaml"
+      - "docs/api/openapi.yaml"
+      - "scripts/export_openapi.py"
+      - "scripts/librerun_smoke.py"
+      # The element-expression guard: the suite loads it and asserts on
+      # the decisions it makes without running pytest — containment, the
+      # NameError verdict, the exit codes that are not a verdict, the
+      # splice's refusal to edit a position the bytes disagree with. A
+      # pull request weakening any of those would otherwise match no
+      # pattern here and merge with the cases that pin them unrun.
+      - "scripts/element_expression_coverage.py"
+      # The backend suite RUNS this one, in a scratch tree, to check that
+      # every agent gets a gateway key and that an .env written before an
+      # agent existed is topped up rather than left to stop `up` (S5-R).
+      # Found by the dependency guard, not by review.
+      - "scripts/demo.sh"
+      # backend/tests/test_obs_vendor_contract.py loads this module from
+      # the repository root and drives every rule in it with an injected
+      # violation (blueprint S7a). Without this line a pull request
+      # weakening the checker the obs-vendors contract tests stand on
+      # would match no filter here and merge with its own tests unrun.
+      - "scripts/obs_vendor_contract.py"
+      # Read by backend/tests/test_secret_sweep.py, which is Gate S's own
+      # gate: the floors that stop "found nothing" meaning "looked at
+      # nothing". A change to the sweep that weakened them would not
+      # run the test that exists to catch it.
+      - "scripts/secret_sweep.py"
+      # The table gate (issue #82). `backend/tests/test_check_tables.py`
+      # executes the script itself, so a pull request weakening the gate
+      # has to run the job; it matched no pattern here until the
+      # dependency guard found the hole.
+      - "scripts/check_tables.py"
+      # The other two tracked-file listings, and the suite that drives
+      # them. `backend/tests/test_tracked_listing.py` loads each script
+      # by PATH at runtime, so the dependency guard's import walk cannot
+      # derive this coupling — the paths are here because the coupling
+      # is real, not because a guard pointed at it. A pull request
+      # editing either script alone would otherwise skip the job that
+      # holds it to reading each tracked path once.
+      - "scripts/check_links.py"
+      - "scripts/check_single_version.py"
+      # The release notes and the section they are cut from (S10).
+      # `backend/tests/test_release_notes.py` loads the script by PATH and
+      # runs it against the real CHANGELOG.md, so no import walk sees the
+      # coupling; the paths are here because it is real. A pull request
+      # that drops the frozen section's highlights, or puts `<owner>` back
+      # into the footer, would otherwise merge with the cases unrun.
+      - "scripts/release_notes.py"
+      - "CHANGELOG.md"
+      # Source access (K blueprint A1): `test_source_access.py` reads the
+      # public repository's URL out of README.md's clone line and the
+      # licence scope map's default out of REUSE.toml. Both are opened by
+      # a pathlib join, which no guard here derives a path from, so a pull
+      # request that moved either alone would skip the cases that hold
+      # `/api/v1/meta` to them.
+      - "README.md"
+      - "REUSE.toml"
+      # The release version file (K6). `backend/tests/test_demo_store_key.py`
+      # imports `librerun._stack` by its absolute name, to drive the demo
+      # store-key top-up directly, and `_stack.release_version` reads the
+      # root `VERSION` by a pathlib join. Found by the dependency guard on
+      # K6's own pull request: until then only relative imports reached
+      # `_stack`, which the walk does not follow, so this coupling had
+      # never been derived.
+      - "VERSION"
+      # The whole SDK source: backend/tests/conftest.py puts it on
+      # sys.path and four test modules import it. `_mcp.py` alone was
+      # here only because one test names that path as a string — the
+      # modules actually imported were invisible (Codex round 6).
+      - "sdk/python/librerun-agent/src/**"
+      # Root-level pytest configuration, which no derived rule can
+      # reach: the dependency guard below demands coverage for files
+      # that EXIST, and the hazard here is a file's ADDITION. pytest
+      # resolves its configfile by walking UP from the invocation
+      # directory, so one added at the repo root takes effect for
+      # `cd backend && pytest` while matching no pattern above.
+      # Measured: a root pytest.ini setting `python_files` takes the
+      # backend suite from 1051 collected to 0 — and the job that
+      # would have caught it does not run, on the pull request or on
+      # the push to main. The seven filenames are pytest's own
+      # `config_names`, read out of its compiled code rather than
+      # retyped (Codex round 14). `conftest.py` is the eighth: adding
+      # a root ini moves rootdir from backend/ to the repo root, which
+      # is what makes a root conftest load at all. Measured both ways,
+      # against a conftest known to load, because the first attempt
+      # said "neither" and the positive control said the attempt was
+      # broken.
+      - "pytest.toml"
+      - ".pytest.toml"
+      - "pytest.ini"
+      - ".pytest.ini"
+      - "pyproject.toml"
+      - "tox.ini"
+      - "setup.cfg"
+      - "conftest.py"
+  pull_request:
+    paths:
+      - "backend/**"
+      - "frontend/**"
+      - ".github/workflows/**"
+      - "scripts/assert_suite_ran.py"
+      # The backend suite READS the gateway's pair and its Dockerfile
+      # (A3): test_requirements_lock.py holds the lock to its source, every
+      # pin to its hashes and the image to the lock alone, so a pull request
+      # touching only one of them must run the suite that checks it.
+      - "services/gateway/requirements.txt"
+      - "services/gateway/requirements.lock.txt"
+      - "services/gateway/Dockerfile"
+      # The backend suite IMPORTS the refresh script, and through it the
+      # guard, and the script writes THIRD_PARTY.md's image rows (A3):
+      # test_refresh_image_digests.py holds the procedure R14's digests
+      # move by, so a pull request touching only one of them must run the
+      # suite that checks it. Found by the dependency guard.
+      - "scripts/refresh_image_digests.py"
+      - "scripts/check_dependency_identity.py"
+      - "THIRD_PARTY.md"
+      # The backend suite READS this page: the CLI test asserts that
+      # `--timeout`, which the guide tells authors to raise, exists on
+      # the parser. That coupling is the point of the test, so a pull
+      # request editing only the page must run the job that checks it —
+      # otherwise the claim and the flag can drift apart with a green
+      # board. Found by the dependency guard, not by review.
+      - "docs/authoring/Container_Agents.md"
+      # Same coupling, found the same way: the example suite asserts that
+      # every `node:` event the LangGraph quickstart shows is a node the
+      # example actually declares. Without this path a pull request could
+      # rename a node in the page alone and merge green, which is the
+      # defect the guard exists to catch, skipped rather than passed.
+      # (The page moved to docs/authoring/ at S6.)
+      - "docs/authoring/LangGraph.md"
+      # The CLI and its templates (blueprint S6): the backend suite
+      # imports `cli/src/librerun` off sys.path and renders every
+      # template through the chassis's own manifest loader and both
+      # batteries, so a template edited alone must run the job that
+      # checks it.
+      - "cli/**"
+      # The manifest field reference and its generator: the suite
+      # regenerates the page from the models and fails when the
+      # committed one differs, so an edit to either alone must run it.
+      - "scripts/export_manifest_reference.py"
+      - "docs/authoring/Manifest.md"
+      # Read by the CLI suite: the hour path's commands must be commands
+      # the parser accepts.
+      - "docs/authoring/Quickstart.md"
+      # The other three pages the S4b phrase test reads — see the push
+      # half above.
+      - "docs/authoring/Agents_Design.md"
+      - "docs/authoring/Run_Contract_v1.md"
+      - "docs/authoring/SDK.md"
+      # The two env examples Gate P reads, and the gateway settings model
+      # it imports — see the push half above.
+      - ".env.example"
+      - "gateway.env.example"
+      # The two the classes gate reads as well, with the router configs
+      # and the Install page it compares them against (K4) — see the
+      # push half above.
+      - "observability.env.example"
+      - "observability-traces.env.example"
+      - "config/**"
+      - "docs/platform/Install.md"
+      - "services/gateway/gateway/config.py"
+      - "agents.compose.yaml"
+      - "compose.sh"
+      - "compose.yaml"
+      - "docs/api/openapi.yaml"
+      - "scripts/export_openapi.py"
+      - "scripts/librerun_smoke.py"
+      # The element-expression guard: the suite loads it and asserts on
+      # the decisions it makes without running pytest — containment, the
+      # NameError verdict, the exit codes that are not a verdict, the
+      # splice's refusal to edit a position the bytes disagree with. A
+      # pull request weakening any of those would otherwise match no
+      # pattern here and merge with the cases that pin them unrun.
+      - "scripts/element_expression_coverage.py"
+      # The backend suite RUNS this one, in a scratch tree, to check that
+      # every agent gets a gateway key and that an .env written before an
+      # agent existed is topped up rather than left to stop `up` (S5-R).
+      # Found by the dependency guard, not by review.
+      - "scripts/demo.sh"
+      # backend/tests/test_obs_vendor_contract.py loads this module from
+      # the repository root and drives every rule in it with an injected
+      # violation (blueprint S7a). Without this line a pull request
+      # weakening the checker the obs-vendors contract tests stand on
+      # would match no filter here and merge with its own tests unrun.
+      - "scripts/obs_vendor_contract.py"
+      # Read by backend/tests/test_secret_sweep.py, which is Gate S's own
+      # gate: the floors that stop "found nothing" meaning "looked at
+      # nothing". A change to the sweep that weakened them would not
+      # run the test that exists to catch it.
+      - "scripts/secret_sweep.py"
+      # The table gate (issue #82) — see the push half above.
+      - "scripts/check_tables.py"
+      # The other two tracked-file listings — see the push half above.
+      - "scripts/check_links.py"
+      - "scripts/check_single_version.py"
+      # The release notes and their changelog — see the push half above.
+      - "scripts/release_notes.py"
+      - "CHANGELOG.md"
+      # Source access (K blueprint A1) — see the push half above.
+      - "README.md"
+      - "REUSE.toml"
+      # The release version file the demo store-key test reaches through
+      # `librerun._stack` (K6) — see the push half above.
+      - "VERSION"
+      # The whole SDK source: backend/tests/conftest.py puts it on
+      # sys.path and four test modules import it. `_mcp.py` alone was
+      # here only because one test names that path as a string — the
+      # modules actually imported were invisible (Codex round 6).
+      - "sdk/python/librerun-agent/src/**"
+      # Root-level pytest configuration — see the push half above.
+      - "pytest.toml"
+      - ".pytest.toml"
+      - "pytest.ini"
+      - ".pytest.ini"
+      - "pyproject.toml"
+      - "tox.ini"
+      - "setup.cfg"
+      - "conftest.py"
+
+permissions:
+  contents: read
+
+jobs:
+  backend-suite:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Both services, because the suite needs both and MEASURED rather
+    # than assumed: with neither reachable it is `46 failed, 951 passed,
+    # 27 skipped`. The 46 say a serviceless job would simply be red; the
+    # 27 are the more interesting number, because those would have passed
+    # by not running.
+    services:
+      postgres:
+        image: docker.io/library/postgres:16@sha256:1a6ab3f5345eb6dbe04a1349529caabdb0ab09293a09590fad07b2246bfa4b54
+        env:
+          POSTGRES_USER: librerun
+          POSTGRES_PASSWORD: ci_only_throwaway
+          POSTGRES_DB: librerun
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U librerun -d librerun"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+      redis:
+        image: docker.io/valkey/valkey:8-alpine@sha256:081c2f5cb575efc901aa80ff9cdbd1ec6a301682fd35e1ebb4b0990a4a4a8507
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql+asyncpg://librerun:ci_only_throwaway@localhost:5432/librerun
+      PGURL: postgresql://librerun:ci_only_throwaway@localhost:5432/librerun
+      REDIS_URL: redis://localhost:6379/0
+      # The same refusal database-parity.yml makes, for the same reason:
+      # a test that skips when its database is absent is a test that can
+      # pass by not running. With this set, the seven `no database at
+      # DATABASE_URL` skips become errors — measured, by pointing
+      # DATABASE_URL at a dead port with the flag on.
+      LIBRERUN_REQUIRE_DB: "1"
+      LOG_STDERR_ENABLED: "false"
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.lock.txt
+            backend/adapters/requirements.lock.txt
+            backend/adapters/build-constraints.txt
+
+      - name: Install the chassis and the adapter
+        # The adapter as well as the chassis, and that is not incidental.
+        # LangGraph is deliberately absent from requirements.txt, and
+        # three test modules — test_adapter_kit_langgraph.py,
+        # test_langgraph_example_probe.py and test_langgraph_example_llm.py,
+        # 64 tests between them — open
+        # with a module-level `pytest.importorskip("langgraph")`. On a
+        # runner with the chassis alone they SKIP, which the zero-skip
+        # assertion below would then report as a failure forever.
+        #
+        # Installing the adapter is the fix rather than exempting those
+        # modules, because an exemption list is a place for the next
+        # optional module to hide.
+        #
+        # From the LOCKS, and in the image's own three steps. This job
+        # collects 1049+ tests — by a wide margin the repository's largest
+        # correctness gate — and the ranges are not what ships. Running it
+        # on a freshly resolved tree means the versions in the image are
+        # exercised by database-parity and chassis-zero-agents alone, so a
+        # pin that breaks the suite could reach a release with every tick
+        # green: a gate reporting success by not looking at the artifact.
+        # The opposite question — does the DECLARED packaging still resolve
+        # against current upstream — is adapter-battery.yml's, deliberately
+        # and exclusively, and it is answered there on the ranges.
+        #
+        # PIP_CONSTRAINT is the image's line too: the adapter's PEP 517
+        # build requirements resolve in an isolated environment that
+        # --no-deps and -c both miss (Codex round 3).
+        run: |
+          pip install -r requirements.lock.txt
+          PIP_CONSTRAINT=adapters/build-constraints.txt \
+            pip install -r adapters/requirements.lock.txt
+          PIP_CONSTRAINT=adapters/build-constraints.txt \
+            pip install --no-deps ./adapters
+
+      - name: The adapter must be importable
+        # Fails loudly here rather than silently downgrading 64 tests to
+        # skips further down.
+        run: python -c "import langgraph, librerun_langgraph"
+
+      - name: The spaCy model Presidio's NER stage needs
+        # Blueprint S4c (gap H15). Not an optimisation and not optional:
+        # since S4c the chassis FAILS CLOSED when the named-entity stage
+        # cannot run — intake, the preview and the upload answer 503 and
+        # the run boundary refuses — so a runner without this model runs
+        # a suite against a platform that is refusing everything.
+        #
+        # Setting LIBRERUN_PII_ALLOW_DEGRADED here instead would turn the
+        # suite green by turning the platform's default posture off, and
+        # this job's largest value is that it exercises the default. It
+        # is also the first time the backend suite has run with stage 3
+        # ACTIVE at all, which is worth more than the download costs.
+        run: |
+          python -m spacy download en_core_web_lg
+          python -c "import spacy; spacy.load('en_core_web_lg')"
+
+      - name: Load the schema the suite expects
+        # The postgres service starts EMPTY. The fixtures probe it with
+        # `SELECT 1`, which an empty database answers happily, so the
+        # suite proceeds and then fails on `relation "tenants" does not
+        # exist` — and LIBRERUN_REQUIRE_DB does not catch it, because the
+        # server IS reachable; that flag asks whether a database
+        # answers, not whether it has any tables.
+        #
+        # Loading `db/schema.sql` is what a fresh container gets, which
+        # is the same thing database-parity.yml and gateway.yml do. It is
+        # psql rather than `alembic upgrade head` because measured: the
+        # migration chain cannot build from nothing — from an empty
+        # database it fails with `relation "users" does not exist` — so
+        # the schema file comes first and alembic brings it to head.
+        run: psql "$PGURL" -v ON_ERROR_STOP=1 -q -f db/schema.sql
+
+      - name: Bring the schema to head
+        run: python -m alembic upgrade head
+
+      - name: The chassis suite
+        run: python -m pytest -q --junitxml=backend-suite.xml
+
+      - name: Keep the suite's report
+        # The report is the record of what ran, and some tests write what
+        # they measured into it: the loop-latency test's
+        # `probe_window_worst_gap_s` and `whole_run_worst_gap_s` (#160) are
+        # otherwise visible only on a local run. Kept on a red run too,
+        # since that is the one worth reading. `path` is from the checkout
+        # root: `working-directory` above applies to `run` steps only. The
+        # name carries the attempt because a re-run keeps its run id and v4
+        # refuses a second upload to one name on a run: without it, a
+        # re-run of a red job would fail here whatever its tests did.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-suite-report-${{ github.run_id }}-${{ github.run_attempt }}
+          path: backend/backend-suite.xml
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: The suite must have RUN, not skipped
+        # The shared assertion, not an inline copy: the frontend half
+        # below calls the same script with its own baseline, so the two
+        # halves cannot drift into applying different standards to the
+        # same risk — which is exactly what happened when this was
+        # written inline here and the frontend half kept only "vitest
+        # exits 1 when it finds no files".
+        #
+        # 1188 is measured on the MERGE RESULT, not on this branch, and
+        # the distinction is the whole value of the number. `on:
+        # pull_request` checks out `refs/pull/N/merge`, so what this job
+        # runs is the branch merged into main — while every baseline
+        # before this one was measured on the branch ALONE. Those two
+        # numbers diverge the moment main gains a test, and a FLOOR
+        # never complains about being too low: the gap just sits there,
+        # silently, as tests that could vanish with a green board.
+        #
+        # Measured: at 1137 this job reported `tests=1183 ... (baseline
+        # 1137)` and passed — 46 tests of slack. Negative-tested by
+        # narrowing discovery two modules' worth (1183 -> 1140): the old
+        # floor ACCEPTED that report, the new one rejects it. The 1197
+        # here is that same merge plus the round-30 through round-36
+        # regression tests, and each was re-measured on the merge rather
+        # than added to by hand. 1202 was S5-E's five run-key guards on
+        # top, and 1233 adds S5-C's thirty-one, measured the same way
+        # each time: the branch sits exactly on main, so the merge result
+        # is the tree that was run. It went 1234, came back to 1232 when
+        # the join those two tests covered was reverted — a floor that
+        # keeps a reverted feature's count is one nobody can satisfy —
+        # and then to 1233 for the progress endpoint's ordinary path,
+        # which nothing had ever covered. 1235 adds the two cases that
+        # pin the example's broad `except` clauses against widening to
+        # BaseException, which would swallow a phase deadline, and 1236
+        # the guard that the quickstart's trace names real nodes, and
+        # 1237 the one pinning that a model may revise the keyword rule
+        # DOWNWARD — the rule is a fallback, not a floor. 1247 adds H12's
+        # ten: three route handlers the suite had never executed at all,
+        # each driven with a non-empty result and paired with its empty
+        # case. 1258 adds the eleven malformed-UTF8 classes that replace
+        # the ONE hand-picked payload guarding the deleted latin-1
+        # fallback — a claim about arbitrary bytes needs a guard over the
+        # classes a decoder rejects, not over a payload someone thought
+        # of. 1269 runs those same eleven classes against the SECOND
+        # handler the fallback was deleted from, which had no test at all
+        # beyond an OpenAPI path assertion. 1273 adds four that EXECUTE
+        # `GET /runs` against this job's own PostgreSQL service and
+        # assert on the rows it returns — the ground truth the
+        # statement-reading module can only approximate, and the reason
+        # this job has a database at all. 1274 adds the tenant-boundary
+        # case: every row in that fixture shared one tenant, so deleting
+        # `Run.tenant_id == tenant_id` left all four green, and neither
+        # module asserted the platform's one mandatory rule. 1284 adds
+        # the ten that drive the six route handlers whose comprehension
+        # BODIES nothing had ever entered — found by mutating every
+        # element expression in `app/routers`, which is a thing line
+        # coverage and a green suite are both blind to (gap H14). 1325
+        # adds the cases that pin the guard's own decisions: what
+        # counts as containment, what counts as a verdict, which pytest
+        # exits are not one, the splice's refusal to edit a position the
+        # bytes disagree with, which lines of a red run get quoted back,
+        # and — from Codex round 1 — that the replacement both RECORDS
+        # the evaluation and raises, and that an element whose removal
+        # leaves a module that parses but will not compile is screened
+        # before anything is written; plus, from round 2, that a BATCH
+        # which will not compile stands down instead of crashing the
+        # run, that a span whose bytes changed under the run is refused
+        # rather than spliced into, and that a workflow running pytest
+        # only from inside a script it names is still censused by the
+        # root-configuration guard — and, from round 3, that a workflow
+        # reaching pytest TWO steps in, through a shell wrapper, is
+        # censused too, while a page the wrapper merely names is not;
+        # and, from round 4, that a `cd` inside such a wrapper moves
+        # what its later commands name, that its comments are not
+        # dependencies, and that whether a reached file is read as
+        # commands is decided by its `#!` line rather than by its
+        # extension; and, from round 5, that a script's commands name
+        # files resolved by TAIL against the tree, so a `cd`, its
+        # quoting and the branch it sits in cannot misplace one. 1329
+        # adds round 6's four: a script discovered BY tail is queued for
+        # expansion rather than only recorded, so the walk does not stop
+        # one wrapper early; `bash wrapper.py` is read as shell; a
+        # quoted path with a space is ONE word, which is `shlex`'s job
+        # now and not this file's; and a pathname glob resolves against
+        # the tree, with `*` stopping at a `/` as the shell's does —
+        # that last one falsifying "tail resolution cannot lose a path",
+        # which §12, the gap row and the pull request had all repeated.
+        # 1331 adds round 7's two: `env bash wrapper.py` reaches the
+        # file it launches, and a quoted path survives the
+        # hand-off to the Python walk, so what only its imports reach is
+        # still checked. Every number here is the control run
+        # of `scripts/element_expression_coverage.py`, which is this
+        # suite, re-measured after the last test was added rather than
+        # predicted from the one before it: 1303 was the arithmetic and
+        # 1305 was the measurement that replaced it.
+        #
+        # 1332 adds round 9's: a shell script with NO shebang, run
+        # explicitly, is read as shell again -- the evidence restored in
+        # the one form that needs no option grammar.
+        #
+        # 1334 adds round 10's two: a quoted metacharacter is a
+        # literal name rather than a glob, and a shell named as DATA on
+        # a command line does not make its operands shell scripts.
+        # Both of those were the guard inventing dependencies, which is
+        # how it would come to accuse a healthy workflow.
+        #
+        # 1337 adds round 11's three: the mark a shell invocation
+        # leaves lands on the path the WALK resolved rather than on one
+        # resolved by a second rule of its own; `env -S` splits its
+        # operand whether or not more than one word comes out; and
+        # whether a word is an active glob is a fact about an
+        # OCCURRENCE, so two spellings of one token keep their own
+        # quoting. All three lost a dependency, which is the expensive
+        # direction.
+        #
+        # 1339 adds round 12's two: an `env -S` string ends at `\c`,
+        # and a BARE extensionless file a script runs is a file it
+        # names. The other two findings of that round changed no count
+        # -- one was in the guard's own verdict table and one deleted a
+        # second lexing without altering a single answer on this tree.
+        #
+        # 1341 adds round 13's two: a control operator does not glue
+        # itself to the path before it, and the `*` of a `case` arm is
+        # NOT every file in the tree. The second is there to keep the
+        # first from being 'fixed' with shlex's whole operator set,
+        # which was measured at 404 phantom dependencies out of 412
+        # tracked files.
+        #
+        # 1342 adds round 14's: a comment that begins right after a
+        # control operator is still a comment, so the paths in it are
+        # not dependencies. Its boundary set includes the parentheses
+        # the SPLITTING set leaves out, because where a word begins and
+        # what to split on are different questions.
+        #
+        # 1344 adds round 15's two: every hand-built lexer clears
+        # shlex's default commenters -- asserted of BOTH readers, since
+        # the point of that round was that fixing one is what went
+        # wrong -- and a backslash escapes nothing inside single
+        # quotes.
+        #
+        # 1346 adds round 16's two: the two readers of a shell line strip
+        # the comment the same way -- round 15 gave them one LEXER and
+        # not one reading, so a commented-out `python -m pytest` seeded
+        # its directory -- and an escaped character is not the character
+        # it looks like, asserted for an escaped space, an escaped
+        # operator and an escaped quote, against what bash prints.
+        #
+        # 1349 adds round 17's three: a command that is not Python parses
+        # no `-m`, and no word ending `.py` is a Python entry unless
+        # Python runs it; a leading assignment does not hide the
+        # command, so `MODE=test bash w.py` is still bash; and a path
+        # the shell-aware reader resolves is queued and reached, not
+        # kept as type evidence while a regex reader splits it.
+        #
+        # 1352 adds round 18's two: only ONE of an invocation's `.py`
+        # words is the entry, the rest being the script's own
+        # arguments, and a route handler defined inside another yields
+        # ONE candidate for its comprehension rather than two that
+        # collide in a batch -- the first defect here that stopped the
+        # guard producing a verdict at all.
+        #
+        # 1355 adds round 19's, three from review and three found by
+        # re-reading those fixes before pushing. From review: `-c` and
+        # `-m` end the INTERPRETER's options and are the script's
+        # arguments after the file operand; an UNTRACKED file is not a
+        # clean tree, because `git diff HEAD` says nothing about a path
+        # HEAD lacks; and a workflow running alembic watches
+        # alembic.ini and the tree its script_location names, not just
+        # the files that could pretend to be alembic. Mine: that new
+        # refusal named HEAD where it tests TRACKED, and its case was
+        # satisfied by the other refusal's message until each was made
+        # exclusive and an injection swapped the two checks; and the
+        # census written for the third finding asked what an invocation
+        # runs without asking whether python is what it RUNS, so `echo
+        # -m alembic` read as running alembic. One helper answers that
+        # for both readers now.
+        #
+        # 1356 adds round 20's, both of them mine again. The meta-guard
+        # drives each census guard TWICE -- once against the real tree
+        # to discover which ones look, once against an empty one to
+        # prove none passes vacuously -- and round 19 taught the whole
+        # pytest outcome family to the second loop only. The alembic
+        # census skips by design where there is no alembic.ini, so the
+        # discovery pass met a Skipped, it escaped `except Exception`,
+        # and the entire meta-guard was marked skipped with no census
+        # guard checked. The family is named ONCE for both loops now.
+        # And a docstring still claimed nine scenarios and five
+        # injections against a measured fourteen and 71; the duplicate
+        # is deleted rather than retyped, because duplicating it is
+        # what let it rot twice.
+        #
+        # 1370 adds round 21's, both mine again, and both a hand-kept
+        # list. The guard's own set of route decorators held five of
+        # the TWELVE names FastAPI registers a route through, so a
+        # handler declared `@router.api_route(...)`, `@router.websocket`,
+        # `@router.options`, `@router.head`, `@router.trace`,
+        # `@router.route` or `@router.websocket_route` had its element
+        # expressions skipped while the commit adding it still ran this
+        # job -- the check running, reporting, and not looking. The
+        # twelve are derived from the INSTALLED FastAPI by a case that
+        # fails when the set stops covering them, with a non-empty
+        # assertion so an empty derivation cannot pass by having
+        # nothing to check. And Python runs a file by PATH, not by
+        # suffix: `python scripts/tool` left an extensionless entry
+        # unseeded and every import under it lost. The `-W ignore`
+        # objection that the suffix rule existed for is answered in the
+        # option grammar instead, read out of `python --help`.
+        #
+        # 1379 adds round 22's, which closed the half of the round before
+        # that I had DECLARED instead of closing. A route registered
+        # imperatively -- `router.add_api_route("/x", handler)` -- is
+        # the same route as the decorator's, and its element
+        # expressions were bypassing the gate; the four registration
+        # methods and their `endpoint` position are derived from the
+        # installed FastAPI by a case that fails when either drifts.
+        # The same round found `(python -m pytest x.py)` beginning its
+        # word list with `(`, so the interpreter was not the command
+        # and the census missed a pytest run bash certainly performs.
+        # The invocation reader treats the delimiters as boundaries
+        # now; the pathname reader deliberately does not, since round
+        # 13 measured that at 404 of 412 tracked files phantom, and the
+        # case ASSERTS the asymmetry rather than trusting this comment
+        # to preserve it.
+        #
+        # 1453 adds round 23's, which is one reported finding and three
+        # times its size. `{ python -m pytest x.py; }` leaves `{` where
+        # the program belongs -- and so do `!`, `time`, and every
+        # branch and loop body, since the `;` before `then` or `do`
+        # leaves the reserved word at the head of the next command.
+        # Surveying the rest found `MODE=test python -m pytest x.py`
+        # and both `env` spellings invisible to this census as well:
+        # round 17 introduced `_the_command` for that exact question
+        # and this third reader never adopted it. Nine of ten shapes
+        # missed. The census asks the helper now, and the reserved
+        # words are bash's own -- `compgen -k`, re-derived by a case
+        # that fails when the list drifts.
+        #
+        # 1592 adds round 24's, the mirror of that one round later: three
+        # of those reserved words take an operand of their OWN, so
+        # stripping them all identically left `time`'s option where the
+        # program belongs and `time -p python -m pytest x.py` went
+        # uncounted. Four shapes, every one a false negative. The rules
+        # are measured against bash -- and `coproc` could not have been
+        # guessed, since `coproc C echo hi` answers `C: command not
+        # found`, so that word is a NAME only in front of a compound
+        # command.
+        #
+        # The survey after that fix found the larger half, unreported:
+        # the module census is `_pytest_runs`'s twin, named beside it
+        # in one docstring sentence since round 21 as reading
+        # `words[0]`, and round 23 swept one and left the other.
+        # Measured -- 14 of 15 command shapes uncounted, three
+        # invocations invented from a `-m` read past the file operand,
+        # `python3.12` missed -- and the shared helper knew neither
+        # joined spelling, so `python -cprint(1) data.py` had been
+        # seeding a file the interpreter never opened. All three
+        # readers ask one helper now.
+        #
+        # How these are RECOGNISED has changed repeatedly under them,
+        # which is worth saying because these sentences once described
+        # the mechanism rather than the property (Codex round 9). Round
+        # 8 deleted the channel that read the INVOKER's options to
+        # decide whether a file is shell -- `env`'s grammar, then
+        # `bash`'s -- after measuring that no tracked `.py` carries a
+        # shell shebang here. Round 9 restored that evidence in the one
+        # form needing no grammar: a command that NAMES a shell marks
+        # the paths it mentions. Round 11 then deleted that function's
+        # own path rule, because having two was the defect. The cases
+        # are named for the property, so they survived every change.
+        #
+        # And, merged from main at round 23, the increments this
+        # branch had not seen. 1333 adds
+        # S7a's sixty: thirty-seven driving every rule in the vendor
+        # contract checker with the violation it exists to catch (a
+        # valid envelope with the resource attributes dropped, the S4
+        # fixture on either leg and on bytes no decoder models, each leg
+        # missing while the other is perfect, a JSON trace leg, a
+        # gzipped one, each vendor's envelope shown a lookalike), and
+        # twenty-three on the overlay the admin page reports — five
+        # unknown selectors refused, Groundcover among them and refused
+        # by ABSENCE from the supported table rather than by a denylist.
+        # One test left with the retired OTEL exporter's census.
+        # Measured on this job's own report for the merge, which is the
+        # tree that runs here: it read `1 failed, 1332 passed` while the
+        # one failure was the paths-filter guard this batch then fixed.
+        # 1346 was S4c's, carried in by the merge of #70 and kept for one
+        # round as the only value certainly not ABOVE the merged count —
+        # a floor too high fails CI, one too low only goes quiet. That
+        # round then measured the merged tree: `backend: tests=1405
+        # skipped=0 errors=0 failures=0 recorded=1405 (baseline 1346)`,
+        # so 1346 was hiding 59 tests and 1405 is the number, read rather
+        # than derived from arithmetic across two trees.
+        #
+        # 1409 is the S4c follow-up's four tests on top of that, and it
+        # is read the same way rather than added by hand: this job
+        # reported `backend: tests=1409 skipped=0 errors=0 failures=0
+        # recorded=1409 (baseline 1405)` on the merge of that branch. The
+        # arithmetic happens to agree this time; the number is still the
+        # report's, because the two only agree while nothing else lands
+        # between the measurement and the bump.
+        #
+        # 1346 is 1274 plus seventy-two, measured as a DELTA on the
+        # MERGE RESULT and not on any one branch: the langgraph modules
+        # are not installed on a dev checkout, so the absolute local
+        # number is not this job's number, and only the difference
+        # transfers.
+        #
+        # Thirty-nine of the seventy-two are S4c's. The other
+        # thirty-three are S4b's six and K1's twenty-seven, both of
+        # which merged while this branch was open and neither of which
+        # raised this floor for its own tests. Re-measuring after the
+        # merge — which is exactly what the paragraph above tells the
+        # next person to do — is what stops that slack compounding: a
+        # floor never complains about being too low, so the gap would
+        # just have sat there.
+        #
+        # S4c's thirty-nine are the detector's readiness states, the
+        # refusal at each attach point (intake, the preview, the upload, the run
+        # boundary, the MCP tool, the log and span walks), the opt-out
+        # with its stamp and its audit row, the smoke's own assertion,
+        # and the negative probe that puts the fixture's name in a
+        # database row with the policy removed.
+        #
+        # So the rule for whoever bumps this next: re-measure after
+        # merging main into your branch, not before.
+        #
+        # 1482 is S5-R on top of S7a's and K2's, re-measured on the merge
+        # result rather than added up — five branches were open at the
+        # same time and each raised this floor for its own. S5-R's
+        # twenty-one are the compose fragment parametrised over every
+        # agent service instead of the echo one, `scripts/demo.sh`'s key
+        # provisioning driven for real in a scratch tree, and the
+        # in-process phase guard's new census of what it leaves out.
+        #
+        # Then main gained S4c's follow-up (the startup probe reads what
+        # it got back) while this was still open — a sixth branch, four
+        # more tests. Measured on that merge result — 1482, not 1478 plus
+        # four — for the same reason: a floor never complains about
+        # being too low.
+        #
+        #
+        # 1510 is S7 on top of that: the boot reconciliation (the
+        # predicate on the real database, the real-lifespan restart
+        # probe, the retry's structure), the run error vocabulary and
+        # its redaction, the runner's error codes, the manifest's
+        # `phases[].steps[]` and `framework`, and the customer/admin
+        # split of the error fields — measured on the branch with
+        # `main` merged in, per the rule above: 1518 on the merge result
+        # with K3 (#75), whose eight new probes were in that total, not
+        # added by hand.
+        #
+        # 1628 is the merge of `main` into this branch, and it is the
+        # rule above applied to itself. Neither side's number describes
+        # the merged tree: this branch measured 1592 with H14's cases,
+        # main measured 1518 with S7's and K3's, and 1592 + (1518 - 1510)
+        # would have been 1600 -- twenty-eight short, which a floor never
+        # complains about. So the merge took a non-numeric stand-in that
+        # no run could satisfy rather than either side's number, and a
+        # run on the merge result filled it: `1628 passed, 14 warnings`, nothing
+        # skipped and nothing failing.
+        #
+        # 1631 is round 25's three cases on top of that merge, measured on
+        # the same tree rather than added to 1628: the pytest census
+        # asked what an invocation RUNS instead of matching the literal
+        # word `pytest` among its first three words, the suite-ran
+        # assertion stopped counting a mention as an assertion, and the
+        # interpreter's option grammar became one scan all three readers
+        # ask. Nine of sixteen command shapes were uncounted and four of
+        # ten mentions were read as real assertions before it; nought of
+        # twenty-six wrong after.
+        #
+        # Two runs before it did not count. The first read `11 failed,
+        # 1617 passed` because the local database sat at
+        # `0016_pii_detector_degraded` while the tree's head was
+        # `0017_run_error_reason`; `alembic upgrade head` turned those
+        # three modules green. The second read `1 failed, 1627 passed`
+        # on `test_the_battery_does_not_block_the_loop_its_probes_run_on`
+        # -- `1.5006 < 1.5`, six ten-thousandths over a wall-clock bound
+        # on a four-CPU box also running the suite. That test passes
+        # alone in 5.96s and passed in the run below. The bound was NOT
+        # loosened and the test was NOT skipped: a timing assertion that
+        # is widened whenever it fires stops being one.
+        # 1561 is S6 on top of both: the CLI and template suite
+        # (`test_librerun_cli.py`) and the manifest reference's drift
+        # check, minus the two tests that pinned the deleted scaffold
+        # (one of them S7 had just extended) — 1521 on the PR's own
+        # head, read from this job's report line; then K3 and S7 merged
+        # into main while it was open and the CLI suite grew four for
+        # K3's precedence. Measured on the merge result, as above.
+        #
+        # Neither of the two numbers above describes this tree either:
+        # 1631 is this branch with round 25's cases and 1561 is S6's CLI
+        # and template suite, and adding them is not a measurement. The
+        # merge takes a non-numeric stand-in no run can satisfy, and a
+        # run on the merge result fills it -- the rule this file states
+        # further up, applied to itself for the second time in two days.
+        #
+        # 1679 is round 26's five cases on top of that merge, measured on
+        # the same tree rather than added to 1674: the JUnit report is
+        # read in both of pytest's spellings, that pair is derived from
+        # pytest's own parser, and two scans that concluded "clean"
+        # from an empty result now hold the non-empty invariant in a
+        # collector -- the rule `_workflow_files` has carried since
+        # round 20 and neither later scan adopted. `rglob` and `glob`
+        # are silent about a directory that is not there; `iterdir`
+        # raises. Measured.
+        #
+        # 1715 is round 27's three cases on top of 1679, measured on the
+        # same tree rather than added to it. The scan read each file
+        # TWICE, in two representations: `read_text` translates
+        # newlines, so on a CRLF checkout a multi-line element recorded
+        # `\n` while the file held `\r\n`, and the splice check called
+        # that "the file changed under the run" -- the guard exiting 5
+        # with no verdict, on a tree where nothing was wrong. One read
+        # now, decoded without translation. Taking the bytes from a
+        # SECOND read is the smaller fix and was measured and rejected:
+        # a save landing between the two reads is recorded as the
+        # scanned bytes, and round 24's staleness check then agrees
+        # with the changed file.
+        #
+        # 1605 is this tree, measured rather than added to 1561: the two
+        # guards for #84 and #85 contribute eleven, and the other
+        # thirty-three had accumulated on main without the floor moving
+        # — which is the argument for re-measuring rather than doing the
+        # arithmetic. `tests=1605 skipped=0 recorded=1605`, read from
+        # the report this job's own reader writes.
+        #
+        # And neither 1715 nor 1605 describes THIS tree: 1715 is this
+        # branch measured before #86 landed on main, 1605 is #86's two
+        # guards measured before this branch landed on it, and adding
+        # them is not a measurement. Filled from a run on the merge
+        # result, which is the rule stated further up applied to itself
+        # for the third time in three days.
+        #
+        # 1732 is this tree, measured on a run of it rather than added to
+        # 1726: six cases for the piped-`grep -q` guard (#81). The count
+        # happening to equal 1726 + 6 is a check on the arithmetic, not
+        # a substitute for the run -- the rule this comment has now
+        # stated for four merges running.
+        #
+        # 2163 is B1b, the public beta, measured on a run of it:
+        # `pytest` passed 2163 with nothing skipped, against Valkey 8.
+        # Over 2161 that is `test_initialize_reports_the_platform_version`
+        # (MCP `initialize` answers with the platform's version, read when
+        # it answers) and
+        # `test_the_beta_takes_its_dated_section_and_leads_with_its_highlights`
+        # (the beta's release notes, against the real CHANGELOG).
+        #
+        # 2161 is A3, dependency identity, measured on a run of it:
+        # `pytest` passed 2161 with nothing skipped, against Valkey 8.
+        # Over 2142 that is the eight of `test_requirements_lock.py` for
+        # the gateway's pair (the lock matches its source, LiteLLM pinned
+        # exactly, every pin hashed, the image installs the lock alone,
+        # LiteLLM a library alone, and the doubles for an unhashed pin, a
+        # LiteLLM range and a proxy extra) and the eleven of
+        # `test_refresh_image_digests.py` (a digest needs two agreeing
+        # sources, a tag served as one platform's manifest is refused, and
+        # a refresh writes one resolution sentence per row).
+        #
+        # 2142 is K9, the admin surface, measured on a run of it:
+        # `pytest` passed 2142 with nothing skipped. Over 2119 that is
+        # the six of `test_admin_deployment.py` (the allowlist, no secret
+        # and no environment dump, a URL's userinfo and query gone, the
+        # state directory, and the transport's two branches), the three
+        # of `test_platform_only_routes.py`, the eight of
+        # `test_agent_keys_api.py`, three in `test_librerun_cli.py`
+        # (doctor's Deployment section, its fallback and the stripped
+        # endpoint), one in `test_secret_sweep.py` (a refused read of the
+        # view stops the sweep) and two in `test_smoke_trace_tree.py`
+        # (the smoke waits for a root named `run`: main's push run on
+        # 74930ca went red on a lone LLM span).
+        #
+        # 2119 is K8b and B1a over T2, on one tree, measured on a run of
+        # the merge result rather than added up: K8b merged at 2096, B1a
+        # had read 2114 over T2, and the last to merge re-measures (the K
+        # blueprint's §5.5). `pytest` passed 2119 with nothing skipped.
+        #
+        # 2114 is K5b, T2 and B1a on one tree, measured on a run of the
+        # merge result rather than added up: T2 merged second at 2091, B1a
+        # had read 2099 over K5b, and the last to merge re-measures (the K
+        # blueprint's §5.5). `pytest` passed 2114 with nothing skipped.
+        #
+        # 2099 is K5b and B1a on one tree, measured on a run of the merge
+        # result rather than added up: K5b merged first at 2076, B1a had
+        # read 2096 on its own, and the second to merge re-measures (the K
+        # blueprint's §5.5). `pytest` passed 2099 with nothing skipped.
+        #
+        # 2096 is B1a, the release machinery, measured on a run of it:
+        # `pytest` passed 2096 with nothing skipped. Over 2073 that is the
+        # twenty of `test_single_version.py` (D38's converter, each label
+        # dotted and not against what pip prints, and the labels outside
+        # its table refused) and three in `test_release_notes.py` (a beta
+        # tag's dated section, the fallback's words, and `#N` kept out of
+        # the public repository's links), none gone.
+        #
+        # 2096 is K8b over T2's 2091, measured on a run of the merged
+        # tree: `pytest` passed 2096 with nothing skipped — K8b's five:
+        # two in `test_battery_mcp_and_traceparent.py` (the echo example
+        # reads `-32006` over MCP as not set, and never returns a
+        # value), one in `test_librerun_cli.py` (the Python template's
+        # helper) and two in `test_secret_sweep.py` (a run slot needs a
+        # stamp its own run moved, and its agent's one planted secret).
+        #
+        # 2091 is T2 over K5b's 2076, measured on a run of the merged tree:
+        # `pytest` passed 2091 with nothing skipped — T2's fifteen below, and
+        # K5b's net three (ten new, seven gone with the retired overlay store's tests).
+        #
+        # 2088 is T2, certificates the admin sees and manages, measured on
+        # a run of it: `pytest` passed 2088 with nothing skipped. Over 2073
+        # that is fifteen new: the twelve of `test_edge_tls.py`, two in
+        # `test_tls_guard.py` (the control volume's holders, and the start
+        # wrapper run with a stand-in `caddy`), and one in
+        # `test_run_contract_battery.py`: every test that shrinks the probe
+        # ceiling times its battery with the collector paused, since a
+        # full collection over this suite's heap outlasted a 0.4s ceiling
+        # on CI (run 36661203696).
+        #
+        # 2073 is A2, source-only distribution, measured on a run of it:
+        # `pytest` passed 2073 with nothing skipped. Over 2063 that is
+        # twelve new and two gone: four in `test_agents_network.py`, four
+        # in `test_librerun_cli.py`, three in `test_release_notes.py` and
+        # one in `test_compose_engine_detection.py`. The two gone named the
+        # registry the images went to; a source-only footer names none.
+        #
+        # 2063 is K8a, tool secrets' backend path, measured on a run of
+        # it: `pytest` passed 2063 with nothing skipped. Over 1979 that is
+        # eighty-five new and one gone: nineteen in
+        # `test_manifest_secrets.py`, fifteen in `test_tool_secret_scrub.py`,
+        # eleven in `test_tool_secrets_service.py`, eight each in
+        # `test_tool_secrets_api.py` and `test_tool_secrets_mcp.py`, six in
+        # `test_capability_secrets.py`, four each in `test_kb_pinecone_key.py`
+        # and the demo agent's `test_search_secret.py`, three each in
+        # `test_gate_t.py` and `test_secret_sweep.py`, and one each in
+        # `test_secret_partition.py`, `test_secret_files.py`,
+        # `test_battery_mcp_and_traceparent.py` and `test_mcp_envelope.py`
+        # (its `secret_get` case); eight of them are Codex's round on #173.
+        # The one gone held the search key masked in the settings model,
+        # which no longer has the field (L13); `test_secret_files.py`'s new
+        # case holds that.
+        #
+        # 1979 is the review after K7, measured on a run of it: `pytest`
+        # passed 1979 with nothing skipped. Over 1976 that is two in
+        # `test_secret_setting_api.py` (a secret setting announced only once
+        # its row commits; the reset's answer read before it, Codex on #172)
+        # and one in `test_demo_store_key.py` (a readable .env made
+        # owner-only before the store key).
+        #
+        # 1976 is K7, provider keys from the UI, measured on a run of it:
+        # `pytest` passed 1976 with nothing skipped. Over 1954 that is the
+        # eight of `test_provider_keys_api.py` (the gateway told only once
+        # the row is committed among them, Codex's first finding), the four
+        # of `test_demo_gateway_key.py` (a readable gateway.env made
+        # owner-only before the key, its second), two in `test_no_provider_key_in_backend.py`
+        # (no value the backend holds loads as a private key, and no RSA
+        # code under `backend/app`), two in `test_secret_partition.py` (Gate
+        # P on the gateway's store key), two in `test_secret_sweep.py` (the
+        # sealed fingerprint must be found, and where), two in
+        # `test_logging_queue.py` (the one digest the log walk leaves
+        # alone), and one each in `test_secrets_service.py` (a key the
+        # gateway shares refuses the write) and `test_librerun_cli.py`
+        # (doctor reports the gateway's key).
+        #
+        # 1954 is the pass before wave 2, measured on a run of it:
+        # `pytest` passed 1954 with nothing skipped. Over 1952 that is
+        # one in `test_tls_guard.py` (a comment in compose.yaml never
+        # stands for the default the guard judges) and one in
+        # `test_librerun_cli.py` (`librerun up` returns only once the
+        # gateway answers); the guard's `*` spellings and the battery's
+        # awaited late batch UPDATED cases, which move no count.
+        #
+        # 1952 is T1, edge TLS, measured on a run of it: `pytest`
+        # passed 1952 with nothing skipped. Over 1935 that is the ten
+        # of `test_tls_guard.py` (the compose.sh guard, the edge's
+        # network and the one address the backend trusts), six in
+        # `test_librerun_cli.py` (`--cacert`, and doctor through this
+        # checkout's edge and no other's) and one in
+        # `test_env_example_classes.py` (the web UI's address demo.sh
+        # prints for the example's loopback port is the origin its CORS
+        # line allows).
+        #
+        # 1935 is K6, the encrypted secrets store, measured on a run of
+        # it: `pytest` passed 1935 with nothing skipped. Over 1880 that
+        # is the sixteen of `test_secrets_table.py`, the twelve of
+        # `test_secrets_service.py`, the seven of `test_rewrap_secrets.py`,
+        # the six of `test_secret_setting_api.py`, the two of
+        # `test_sso_runtime_secret.py`, the five of
+        # `test_demo_store_key.py`, five in `test_secret_sweep.py`, and
+        # one each in `test_secret_partition.py` and
+        # `test_librerun_cli.py`.
+        #
+        # 1880 is K5a, agent settings as data, measured on a run of it:
+        # `pytest` passed 1880 with nothing skipped. Over 1837 that is
+        # the thirteen of `test_manifest_settings.py`, the three of
+        # `test_alembic_single_head.py`, the ten of
+        # `test_agent_settings_service.py`, the five of
+        # `test_agent_settings_api.py`, Gate T's four
+        # (`test_gate_t.py`, its negative double among them), the five of
+        # `test_capability_config.py` (one of them Codex's finding on
+        # #163), one in `test_capability_mcp.py` (`config_get` with no
+        # grant) and two in `test_battery_mcp_and_traceparent.py`.
+        #
+        # 1837 is A1 and K4b on one tree, measured on a run of the merge
+        # result rather than added up: A1 merged first at 1823, K4b had
+        # read 1829 on its own, and the second to merge re-measures
+        # (the K blueprint's §5.5).
+        #
+        # 1829 is K4b measured on a run of it: `pytest` passed 1829
+        # with nothing skipped. Over 1815 that is the two cases of
+        # `test_orm_server_defaults.py` and the one of
+        # `test_app_settings_put_twice.py` (H17), the four of
+        # `test_platform_admin_flag.py`, and seven in
+        # `test_librerun_cli.py` (doctor's credentials).
+        #
+        # 1823 is K blueprint A1, source access: 1815 plus the seven
+        # cases of `test_source_access.py` (the default source URL at the
+        # running version's tag, the operator's override, a blank setting
+        # meaning the default — empty and whitespace — the body's exact
+        # keys, a canary in every other string setting, and the licence as
+        # REUSE.toml's default) and `test_release_notes.py`'s footer case,
+        # each seen red once on the mutation it exists to catch. Read off
+        # this job's report on the A1 pull request, and equal to a local
+        # run of the same tree with the adapter installed.
+        #
+        # 1815 is this tree measured on a run of it, S10's release
+        # candidate: `pytest` passed 1815 with nothing skipped, and
+        # `--collect-only -q` agrees. Over 1804 that is the six cases of
+        # `test_release_notes.py` (the 1.0.0 notes lead with their
+        # highlights and name the image owner the workflow resolves) and
+        # the five of `test_compose_engine_detection.py` (a stopped
+        # Docker is told apart from a missing one).
+        #
+        # 1804 is 1788 plus the sixteen cases of
+        # `test_pii_email_any_domain.py` (S10). The release candidate's
+        # G0 walk planted an address in a support log and the intake's
+        # redaction preview handed it back untouched: stage 3 validates
+        # a domain against the public-suffix list, so `jsmith@corp.local`
+        # reached the database raw while `@….com` was caught. Twelve of
+        # the sixteen go red with the stage-1 pattern taken out, and one
+        # more with the identifier list's index lookup put back.
+        # Measured with `pytest --collect-only -q`, which reported 1804.
+        #
+        # 1788 is 1783 plus five cases for two tracked-file listings
+        # that were never fixed when `check_tables.py` was — the
+        # register's most repeated finding, a rule applied where the
+        # report pointed rather than everywhere it is true. NOTE the
+        # baseline was left at 1780 when three CLI cases landed, and
+        # `assert_suite_ran.py` compares `tests < baseline`, so the
+        # staleness passed in silence: it would not have caught those
+        # three being lost again. Re-measured here with
+        # `pytest --collect-only -q`, which reported 1788.
+        #
+        # 1780 is 1777 plus three cases for a defect this gate had in
+        # review: `main` skipped a path that names no file with a bare
+        # `continue` and still counted it in the verdict, so
+        # `check_tables.py ok.md absent.md` printed "clean: all 1
+        # row(s) in 1 table(s) across 2 Markdown file(s)" and exited 0
+        # — a gate naming a file it never opened, which is the shape
+        # the script exists to forbid. Reproduced before it was
+        # changed. The listing is NUL-separated now for the same
+        # reason: `git ls-files` cooks a path with a space or a
+        # non-ASCII character, `.split()` turned it into paths naming
+        # no file, and those were then dropped by that same silent
+        # skip. Measured with `pytest --collect-only -q`.
+        #
+        # 1777 is 1759 plus the eighteen cases of
+        # `test_check_tables.py`, which negative-test
+        # `scripts/check_tables.py` — the gate for issue #82, where GFM
+        # dropped seventeen rows' excess cells and thirteen of them lost
+        # the Owner column — three of which are for the half of that
+        # bug the gate itself committed, where five rows sat outside
+        # every table and the row-count check called it clean. Measured
+        # with `pytest --collect-only -q`.
+        #
+        # 1759 is 1747 plus the twelve cases of
+        # `test_agent_scenarios.py`, which pins what "the first
+        # scenario" resolves to for every agent. CI is why it exists:
+        # this change's first draft added `demo-capabilities.json` to
+        # the echo agent, which sorts before `demo-echo.json` and so
+        # silently repointed five readers at once. Measured with
+        # `pytest --collect-only -q` on this tree.
+        #
+        # 1747 is the battery's two untested obligations — `run.mcp.url`
+        # and the `traceparent` that may be absent:
+        # fifteen cases in `test_battery_mcp_and_traceparent.py` for
+        # `run.mcp.url` and the headerless invocation. Measured with
+        # `pytest --collect-only -q` on this tree, which reported
+        # `1747 tests collected`; the twenty-three cases in
+        # `test_run_contract_battery.py` that this change touches were
+        # UPDATED, not added, so they move no count and none of them is
+        # in the fifteen.
+        run: python3 ../scripts/assert_suite_ran.py backend-suite.xml 2163 backend
+
+  frontend-suite:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        # `npm ci` and not `npm install`, so the lockfile is what is
+        # tested and a drifting lockfile fails here rather than being
+        # rewritten in place.
+        run: npm ci
+
+      - name: The production build
+        # `next build` type-checks and lints the app's modules. It does not
+        # type-check the tests under `__tests__/`, and no step here does.
+        run: npm run build
+
+      - name: The build really produced the app
+        # `npm run build` runs whatever `scripts.build` says. It does not
+        # promise that Next ran. Measured: with `"build": "true"` the step
+        # exits 0 and leaves no `.next` at all, so a package.json change
+        # could remove ALL type-checking and linting from CI and every
+        # tick would stay green (Codex round 17).
+        #
+        # The suite half of this job already has this property and that is
+        # why it was never at risk: `npm test` must write a report that
+        # the next step then reads, so a no-op `scripts.test` fails with
+        # `cannot read frontend-suite.xml` — measured too. This gives the
+        # build half the same shape: demand the artifact, not the exit
+        # code.
+        #
+        # `standalone/server.js` rather than merely `.next`, because
+        # `output: "standalone"` in next.config.mjs is what compose and
+        # the Dockerfile actually deploy. Asserting the artifact the
+        # deployment needs also catches that setting being dropped.
+        run: |
+          set -euo pipefail
+          test -f .next/BUILD_ID
+          test -f .next/standalone/server.js
+          echo "build id: $(cat .next/BUILD_ID)"
+
+      - name: The frontend suite
+        # A machine-readable report, for the same reason the backend half
+        # produces one. vitest's exit code distinguishes "no test files"
+        # from "some test files" and nothing finer, so a `vitest.config`
+        # narrowed from six files to one, or files deleted, still exits 0
+        # while `next build` happily compiles the missing assertions away
+        # (Codex P2). That is the backend's `tests > 0` hole wearing
+        # different clothes, and I had argued the exit code was enough.
+        run: npm test -- --reporter=junit --outputFile=frontend-suite.xml
+
+      - name: The frontend suite must have RUN, not shrunk
+        # 79 is measured on the merge result, for the reason spelled out
+        # at the backend baseline above. The same script and the same
+        # floor semantics as that half — including the same drift: 65
+        # was measured on a branch, main then added a 14-test file, and
+        # this job has been reporting `tests=79 ... (baseline 65)` and
+        # passing ever since. Negative-tested by excluding one 3-test
+        # file (79 -> 76): 65 accepted it, 79 rejects it.
+        #
+        # 103 is S7: the run page's logic (the timeline, the labels, the
+        # model column's E5 rule, the sanitized error, the polling policy,
+        # the duration) and the scan proving no component keys on an
+        # agent id, measured the same way.
+        #
+        # 106 is K blueprint A1: the Source link's three cases in
+        # `sourceLink.test.ts`, rendered with React's own `createRoot` and
+        # `act` in jsdom — the link from /meta in a new tab (red with `rel`
+        # dropped), nothing until /meta answers, nothing for a URL that is
+        # not http(s). Read off this job's report on the A1 pull request.
+        #
+        # 113 is K4b: the first component tests (the agent page's tabs,
+        # the scope chip, the settings page's 403, the hub's links), which
+        # the vitest include reaches only as `src/**/__tests__/**`.
+        #
+        # 116 is A1 and K4b on one tree, measured on a run of the merge
+        # result: A1's three and K4b's ten over 103.
+        #
+        # 118 is that tree and the tab shell's two reload cases, found on a
+        # review of the merge: a Save's reload answering for an agent the
+        # page has left is dropped, and does not hold up the next agent's
+        # own answer.
+        #
+        # 131 is K5a: the Settings tab's seven cases
+        # (`SettingsPanel.test.tsx`) and the six of its payload
+        # (`settingsPayload.test.ts`).
+        #
+        # 139 is K6: the settings page's secret row, the eight cases of
+        # `secretSetting.test.tsx`.
+        #
+        # 152 is K7: the six of `sealing.test.ts`, which hold the browser's
+        # seal and fingerprint to `openssl`, and the seven of
+        # `ModelProviders.test.tsx`, the D19 refusal among them.
+        #
+        # 164 is T2: the twelve of `CertificatesPanel.test.tsx` — each
+        # need's action, no key on the page, and no change with the edge
+        # off.
+        #
+        # 165 is K8b: the Secrets tab's eleven (`SecretsPanel.test.tsx`),
+        # the `agent` chip's case in `ScopeChip.test.tsx` and the tab's
+        # availability in `AgentPageTabs.test.tsx`.
+        #
+        # 177 is T2 and K8b on one tree, measured on a run of the merge
+        # result: T2's twelve and K8b's thirteen over 152.
+        #
+        # 205 is K9: the four of `DeploymentPanel.test.tsx`, the ten of
+        # `KeysPanel.test.tsx` (five for Codex's two rounds: a value shown
+        # before the refresh answers, none on a page that moved on, a
+        # grace that is not a whole number refused, the actions held until
+        # the rows catch up, and no older read setting the rows), the five
+        # of `scopeChips.test.tsx`, the four of `platformOnly.test.tsx`, the
+        # four of `adminHub.test.tsx` and the Keys case in
+        # `AgentPageTabs.test.tsx`, over 177.
+        run: python3 ../scripts/assert_suite_ran.py frontend-suite.xml 205 frontend

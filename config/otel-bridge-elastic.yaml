@@ -1,0 +1,52 @@
+# ============================================================================
+# LibreRun — OTLP protobuf bridge, Elastic leg (blueprint S7a)
+#
+# Selected by LIBRERUN_OBS_VENDOR=elastic: compose points the bridge at
+# this file instead of config/otel-bridge.yaml (the Cribl leg). One
+# stock OpenTelemetry Collector doing exactly one spec-defined job:
+#
+#   vector (elastic_traces sink, OTLP/JSON over HTTP, in-network)
+#     --> this bridge :4318 /v1/traces
+#     --> OTLP HTTP + protobuf + TLS --> Elastic APM OTLP intake
+#
+# ELASTIC_APM_OTLP_URL is the intake URL with its path — /v1/traces on
+# an APM server, or the Elastic Cloud managed OTLP endpoint's traces
+# path. `traces_endpoint` rather than `endpoint` because the URL is
+# given whole: `endpoint` would append /v1/traces a second time.
+#
+# `ApiKey <key>` is the scheme Elastic documents for API keys. Scheme
+# and credential are separate variables so a self-managed APM server
+# taking a secret token sets ELASTIC_APM_AUTH_SCHEME=Bearer and puts
+# the token in ELASTIC_APM_API_KEY, changing nothing else.
+#
+# The APM key is its OWN name rather than the cluster's
+# ELASTIC_API_KEY: Elastic issues them separately, and naming them
+# separately is what lets each process be handed only the credential
+# it reads (L28, Gate P).
+#
+# Runs only with the `obs` compose profile; never publishes a port —
+# the only listener is on the compose network. An empty
+# ELASTIC_APM_OTLP_URL stops the bridge at start-up with a named error
+# rather than starting something that drops every span.
+# ============================================================================
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+exporters:
+  otlphttp:
+    traces_endpoint: ${env:ELASTIC_APM_OTLP_URL}
+    headers:
+      authorization: "${env:ELASTIC_APM_AUTH_SCHEME} ${env:ELASTIC_APM_API_KEY}"
+
+service:
+  telemetry:
+    logs:
+      level: warn
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [otlphttp]

@@ -1,0 +1,67 @@
+# The TypeScript reference server (blueprint S5/S5-R, promise 2): the
+# whole Run Contract in one file, with the Vercel AI SDK making the model
+# call. Lives under _examples/ — the leading underscore keeps it out of
+# production discovery. To run it: start the container
+# (agents.compose.yaml, the demo profile), set VERCEL_AGENT_URL, and put
+# this directory on LIBRERUN_AGENTS_PATH (the demo's .env already does:
+# ``agents:agents/_examples``).
+manifest_version: 1
+id: vercel-answer
+name: Vercel AI SDK Answer (example)
+description: >-
+  Example container agent in TypeScript: the Vercel AI SDK's
+  generateText answers a question, with one tool it may call for a
+  service's status. It serves Run Contract v1 itself — no LibreRun
+  package is needed to be a LibreRun agent — and reaches the model only
+  through the platform gateway, so the run produces a costed LLM span
+  and an admin can retarget the step without redeploying the container.
+# The badge on the agent card (blueprint S7): a label, nothing the
+# chassis dispatches on.
+framework: vercel-ai-sdk
+runtime: container
+container:
+  # Expanded from the chassis environment at discovery; registration is
+  # skipped (logged) while the variable is unset, exactly as the echo
+  # example's ECHO_AGENT_URL is.
+  url: ${VERCEL_AGENT_URL}
+input_schema: input_schema.json
+phases:
+  - name: answer
+    # The one progress row the server reports, with the label the run
+    # page shows (blueprint S7). The id equals the LLM step below, so
+    # the page can show the model that answered it.
+    steps:
+      - id: answer
+        label: Asking the model, with a tool available
+output:
+  mode: structured
+
+# Without the ``llm`` grant every model call is refused 403
+# llm_not_granted whatever credential the container presents, and the
+# chassis manifest loader refuses ``llm.steps`` without it outright.
+capabilities:
+  - llm
+
+# The one model call this agent makes. Every value here is a DEFAULT:
+# the tenant's admin configuration overrides provider, model,
+# temperature, max_tokens and timeout for this step at request time
+# (L25, D13), so changing the model restarts nothing.
+llm:
+  steps:
+    - id: answer
+      label: "The answer, with a tool available"
+      description: >-
+        Answers the question. One tool is offered — a service status
+        lookup the container resolves from its own table — and the model
+        decides whether to call it.
+      provider: openai
+      model: gpt-4o-mini
+      temperature: 0.2
+      max_tokens: 600
+      timeout_seconds: 60
+
+feedback_sections:
+  - id: overall
+    label: Overall
+
+scenarios: scenarios

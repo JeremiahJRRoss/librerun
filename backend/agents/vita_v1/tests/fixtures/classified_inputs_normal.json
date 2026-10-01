@@ -1,0 +1,10 @@
+{
+  "valid": true,
+  "error_signals": [
+    "Timestamp not accepted"
+  ],
+  "primary_vendor": "Elastic",
+  "integration_type": "Data ingestion",
+  "secondary_vendor": "Cribl",
+  "input_quality_score": 0.8
+}

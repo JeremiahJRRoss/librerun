@@ -1,0 +1,10 @@
+{
+  "name": "Demo: summarize an incident write-up",
+  "description": "Runs the two-step LlamaIndex Workflow over a short incident write-up and asks for a brief an on-call engineer can act on.",
+  "user_inputs": {
+    "document": "At 09:14 UTC the checkout service began returning 502 for about one request in five. The gateway's connection pool to the payments vendor had been exhausted since a deploy at 08:50 raised the per-request timeout from 2s to 30s, so slow calls held connections that used to be recycled. Retries made it worse. We rolled the deploy back at 09:41 and the error rate fell to zero within two minutes. 1,184 checkouts failed; support reopened 37 tickets. No payment was taken twice. Follow-ups: cap the vendor timeout at 5s, alert on pool saturation rather than on error rate alone, and add the pool gauge to the checkout dashboard.",
+    "audience": "an on-call engineer",
+    "focus": "the customer impact and what to change",
+    "max_points": 5
+  }
+}

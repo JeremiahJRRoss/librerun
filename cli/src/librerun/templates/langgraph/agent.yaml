@@ -1,0 +1,60 @@
+# __AGENT_NAME__ — a LangGraph graph running inside the LibreRun backend.
+# Scaffolded by `librerun init __AGENT_ID__ --template langgraph`.
+# Field reference: docs/authoring/Manifest.md.
+manifest_version: 1
+
+id: __AGENT_ID__
+name: __AGENT_NAME__
+description: >-
+  A LangGraph graph that answers a question. One node asks a model
+  through the platform gateway (the `answer` step below) and falls back
+  to a deterministic reply when no model answers, so the agent runs
+  keyless too and says which of the two answered.
+
+runtime: python-package
+# The badge on the agent's card (S7); a label only, the chassis never
+# dispatches on it.
+framework: langgraph
+
+# One phase, one graph. For a human approval gate between two phases,
+# declare a second entry with `approval: true` and hand the adapter a
+# second graph — docs/authoring/LangGraph.md §2.
+phases:
+  - name: answer
+    # The run page's labels for the progress rows this phase reports. The
+    # adapter reports one row per graph node as `<phase>:<node>`; a row
+    # declared nowhere still shows, under its raw id.
+    steps:
+      - id: "answer:answer"
+        label: Ask the model, or the rule
+      - id: "answer:summarise"
+        label: Shape the answer
+
+output:
+  mode: structured
+
+# The grants. `llm` is what lets the gateway answer this agent's model
+# calls at all; `pii` is the intake redaction pipeline on demand
+# (`caps.pii.redact(...)`) for anything the agent fetches itself.
+capabilities: [llm, pii]
+
+# The one model call this agent makes. Every value here is a DEFAULT: the
+# admin agent-configuration page edits provider, model, temperature and
+# limits per step, and the gateway resolves them at request time (L25,
+# D13) — a model change needs no redeploy. A step id the manifest does
+# not declare is refused (400 unknown_step).
+llm:
+  steps:
+    - id: answer
+      label: "The answer"
+      description: Answers the question; the rule below is the fallback.
+      provider: openai
+      model: gpt-4o-mini
+      temperature: 0.2
+      max_tokens: 400
+      timeout_seconds: 30
+
+scenarios: scenarios
+
+ui:
+  intake: {}

@@ -1,0 +1,44 @@
+{
+  "type": "object",
+  "title": "Incident report",
+  "required": ["title", "service", "description"],
+  "properties": {
+    "title": {
+      "type": "string",
+      "title": "What happened?",
+      "maxLength": 200
+    },
+    "service": {
+      "type": "string",
+      "title": "Affected service",
+      "maxLength": 100
+    },
+    "description": {
+      "type": "string",
+      "title": "Describe the impact",
+      "maxLength": 4000
+    },
+    "logs": {
+      "type": "string",
+      "title": "Relevant log lines",
+      "maxLength": 20000,
+      "x-pii": true
+    },
+    "probe": {
+      "type": "object",
+      "title": "Instrumentation probe (example diagnostics)",
+      "description": "Not part of triage, and deliberately not in the intake wizard. These switches make the example emit the things the platform's redaction and logging guarantees are stated over: its own span attribute, a logging line, a print(), a write to sys.stderr, a logging.exception() traceback, and an attempt to attach a log handler mid-invocation. This is how the acceptance drives an in-process agent.",
+      "properties": {
+        "text": { "type": "string", "maxLength": 200, "x-pii": true },
+        "span_attribute": { "type": "boolean" },
+        "log": { "type": "boolean" },
+        "print": { "type": "boolean" },
+        "stderr": { "type": "boolean" },
+        "exception": { "type": "boolean" },
+        "attach_handler": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

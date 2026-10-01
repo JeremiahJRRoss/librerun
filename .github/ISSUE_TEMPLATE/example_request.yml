@@ -1,0 +1,57 @@
+name: Example or framework request
+description: An agent framework or pattern you want LibreRun to show working.
+labels: ["example"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        LibreRun ships one example per pattern, and **every example is in the
+        conformance battery** that CI runs — that is what stops the gallery
+        from rotting. So this request is really two: the example, and its
+        place in the matrix. See
+        [CONTRIBUTING.md](https://github.com/JeremiahJRRoss/librerun/blob/main/CONTRIBUTING.md).
+  - type: input
+    id: framework
+    attributes:
+      label: Framework or pattern
+      placeholder: "CrewAI / OpenAI Agents SDK / a plain HTTP agent in Go / retrieval over a local corpus"
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: What it would show that an existing example does not
+      description: >
+        The gallery has: the bundled multi-step agent with an approval gate, a
+        reference echo container on the SDK, a LangGraph graph, a LlamaIndex
+        workflow, and a TypeScript server speaking the Run Contract directly.
+        What is the gap?
+    validations:
+      required: true
+  - type: dropdown
+    id: shape
+    attributes:
+      label: Which shape
+      options:
+        - In-process agent (a Python package under the agents directory)
+        - Container agent (Run Contract v1 over HTTP+SSE)
+        - A framework adapter (like librerun-langgraph), reusable by others
+        - Not sure — that is fine, say why below
+    validations:
+      required: true
+  - type: textarea
+    id: model-calls
+    attributes:
+      label: How it would call a model
+      description: >
+        Every example reaches a model through the LibreRun gateway and works
+        **keyless** in the demo, so a newcomer can run it with no provider
+        account. If the framework cannot be pointed at an OpenAI-compatible
+        base URL, say so — that is the interesting part of the work.
+  - type: checkboxes
+    id: offer
+    attributes:
+      label: Would you write it?
+      options:
+        - label: I would like to contribute this example myself.
+        - label: I can review or test it, but not write it.

@@ -1,0 +1,198 @@
+# The checks that need a REAL PostgreSQL (blueprint S1). The unit suite
+# runs without one; these cannot, and a test that skips when its
+# database is absent is a test that can pass by not running. So the
+# database-backed tests fail — not skip — when LIBRERUN_REQUIRE_DB=1 is
+# set, and this job sets it: a green run here means they executed.
+#
+# What runs against the service container:
+#   1. migration parity (scripts/migration_parity.sh): the head schema
+#      file and the migration chain must produce the same database, both
+#      ways — `alembic upgrade head` is a proven no-op on a fresh load,
+#      a seeded pre-S1 database upgrades to an identical dump with its
+#      data and labels intact, and `alembic downgrade` restores the
+#      pre-012 state exactly;
+#   2. the mounted schema file loaded into the app's database, exactly as
+#      a fresh compose install gets it, plus `alembic upgrade head`;
+#   3. the gap H6 regression tests (a second connection reads a sign-in's
+#      session row and a logout's revoked_at the instant the response
+#      leaves the app);
+#   4. migration 014's data migration — the part a --schema-only dump
+#      cannot see: every tenant that exists at upgrade time inherits the
+#      configuration its admin had been editing, and a re-run of the
+#      seed overwrites nothing;
+#   5. manifest-snapshot reconciliation — discovery's rows, and the
+#      absent stamp that stops an uninstalled agent authorizing calls.
+name: database-parity
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - "backend/db/schema.sql"
+      - "scripts/migration_parity.sh"
+      - ".github/workflows/**"
+      # Root-level pytest configuration, which no derived rule can
+      # reach: the dependency guard below demands coverage for files
+      # that EXIST, and the hazard here is a file's ADDITION. pytest
+      # resolves its configfile by walking UP from the invocation
+      # directory, so one added at the repo root takes effect for
+      # `cd backend && pytest` while matching no pattern above.
+      # Measured: a root pytest.ini setting `python_files` takes the
+      # backend suite from 1051 collected to 0 — and the job that
+      # would have caught it does not run, on the pull request or on
+      # the push to main. The seven filenames are pytest's own
+      # `config_names`, read out of its compiled code rather than
+      # retyped (Codex round 14). `conftest.py` is the eighth: adding
+      # a root ini moves rootdir from backend/ to the repo root, which
+      # is what makes a root conftest load at all. Measured both ways,
+      # against a conftest known to load, because the first attempt
+      # said "neither" and the positive control said the attempt was
+      # broken.
+      - "pytest.toml"
+      - ".pytest.toml"
+      - "pytest.ini"
+      - ".pytest.ini"
+      - "pyproject.toml"
+      - "tox.ini"
+      - "setup.cfg"
+      - "conftest.py"
+      # The shared "the suite RAN" assertion this job now calls. It
+      # lives outside every pattern above, so without this line a pull
+      # request weakening the one rule all these jobs rely on would skip
+      # them all and merge unexercised — the same trap round 3 found in
+      # unit-suites when the assertion was extracted from it.
+      - "scripts/assert_suite_ran.py"
+  pull_request:
+    paths:
+      - "backend/**"
+      - "backend/db/schema.sql"
+      - "scripts/migration_parity.sh"
+      - ".github/workflows/**"
+      # Root-level pytest configuration — see the push half above.
+      - "pytest.toml"
+      - ".pytest.toml"
+      - "pytest.ini"
+      - ".pytest.ini"
+      - "pyproject.toml"
+      - "tox.ini"
+      - "setup.cfg"
+      - "conftest.py"
+      - "scripts/assert_suite_ran.py"
+
+permissions:
+  contents: read
+
+jobs:
+  db-backed-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: docker.io/library/postgres:16@sha256:1a6ab3f5345eb6dbe04a1349529caabdb0ab09293a09590fad07b2246bfa4b54
+        env:
+          POSTGRES_USER: librerun
+          POSTGRES_PASSWORD: ci_only_throwaway
+          POSTGRES_DB: librerun
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U librerun -d librerun"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql+asyncpg://librerun:ci_only_throwaway@localhost:5432/librerun
+      PGURL: postgresql://librerun:ci_only_throwaway@localhost:5432/librerun
+      LIBRERUN_REQUIRE_DB: "1"
+      LOG_STDERR_ENABLED: "false"
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.lock.txt
+
+      - name: Install backend dependencies
+        # From the LOCK, not the ranges. The image installs the lock, so
+        # resolving fresh here would let migration parity and the H6
+        # database checks pass under an Alembic, SQLAlchemy, FastAPI or
+        # asyncpg that never ships — a green tick that does not cover the
+        # image, or a red one from an upstream release nobody chose.
+        run: pip install -r requirements.lock.txt
+
+      - name: PostgreSQL client tools
+        # psql and pg_dump; the runner image normally ships them, and a
+        # pg_dump older than the server refuses to dump it, so the version
+        # is pinned to the service's major.
+        run: |
+          set -euo pipefail
+          if ! command -v pg_dump >/dev/null || ! grep -q ' 16\.' <<< "$(pg_dump --version 2>/dev/null || true)"; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client-16
+          fi
+          psql --version && pg_dump --version
+
+      - name: Migration parity (fresh no-op, seeded upgrade, downgrade)
+        env:
+          PGURL: postgresql://librerun:ci_only_throwaway@localhost:5432
+          PYTHON: python
+        # The script's own checks are sound — `same()` and `expect()` both
+        # exit 1, under `set -euo pipefail`, so a FAILING comparison aborts
+        # the step. What was missing is the other direction: a script that
+        # exits 0 WITHOUT reaching its checks. Measured: truncate it after
+        # its preamble and it exits 0, and `grep` across the repository
+        # found its closing `MIGRATION PARITY OK` marker read NOWHERE. So
+        # the same shape as the build step — a success marker produced and
+        # never demanded — at lower likelihood, because reaching it means
+        # editing the check itself rather than an unrelated config file.
+        #
+        # `pipefail` keeps a failing script failing through the tee; the
+        # grep is what refuses a run that never got to the end.
+        run: |
+          set -euo pipefail
+          ../scripts/migration_parity.sh | tee parity.log
+          grep -q "MIGRATION PARITY OK" parity.log
+
+      - name: Load the mounted schema (what a fresh container gets)
+        run: psql "$PGURL" -v ON_ERROR_STOP=1 -q -f db/schema.sql
+
+      - name: alembic upgrade head is a no-op on the fresh schema
+        # The entrypoint only WARNS when this fails, so a migration that
+        # cannot cope with the schema file's result would leave every
+        # fresh install silently stuck behind head. Here it is fatal.
+        run: |
+          set -euo pipefail
+          python -m alembic upgrade head
+          head=$(python -m alembic heads | awk '{print $1}')
+          current=$(psql "$PGURL" -tAc "SELECT version_num FROM alembic_version")
+          echo "head=$head current=$current"
+          test "$current" = "$head"
+
+      - name: Gap H6 regression tests against the real database
+        run: python -m pytest tests/test_h6_transaction_boundary.py -q -rs --junitxml=h6-suite.xml
+
+      - name: The h6 suite must have RUN, not shrunk
+        run: python3 ../scripts/assert_suite_ran.py h6-suite.xml 3 h6
+
+      - name: Migration 014's data migration against the real database
+        # Parity dumps are --schema-only, so they cannot see whether the
+        # upgrade seeded every tenant's step overrides from the legacy
+        # per-agent file. These do, over a synthetic agents tree.
+        run: python -m pytest tests/test_migration_014_seed.py -q -rs --junitxml=migration-014-suite.xml
+
+      - name: The migration-014 suite must have RUN, not shrunk
+        run: python3 ../scripts/assert_suite_ran.py migration-014-suite.xml 9 migration-014
+
+      - name: Manifest snapshot reconciliation against the real database
+        # The upsert turns on ON CONFLICT ... RETURNING xmax = 0 and the
+        # absent stamp on an array predicate; a double would prove
+        # nothing about either.
+        run: python -m pytest tests/test_agent_snapshots.py -q -rs --junitxml=agent-snapshots-suite.xml
+
+      - name: The agent-snapshots suite must have RUN, not shrunk
+        run: python3 ../scripts/assert_suite_ran.py agent-snapshots-suite.xml 9 agent-snapshots

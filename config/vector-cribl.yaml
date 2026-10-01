@@ -1,0 +1,179 @@
+# ============================================================================
+# LibreRun — Vector Cribl overlay (Cribl Cloud or self-hosted Stream)
+#
+# Merged on top of vector.yaml when Cribl forwarding is enabled — the same
+# overlay mechanism as the Jaeger viewer (config/vector-viewer.yaml), plus
+# one companion service for traces:
+#   1. set VECTOR_CRIBL=1 in .env plus the CRIBL_* endpoints/tokens
+#   2. ./compose.sh --profile cribl up -d
+#      (the profile starts the otel-bridge service; env changes RECREATE
+#       containers — a bare `restart` keeps the old env)
+#
+# Two destinations; every hop off the box dials OUT over TLS:
+#
+#   logs   (backend file + OTel log records) --> Cribl HEC source
+#          CRIBL_HEC_ENDPOINT   base URL, no path (the sink appends
+#                               /services/collector/event itself),
+#                               e.g. https://default.main.<org>.cribl.cloud:8088
+#          CRIBL_HEC_TOKEN      from the HEC source's Auth Tokens tab
+#
+#   traces (every span) --> otel-bridge service --> Cribl OTel source
+#          The sink below posts OTLP/JSON to the in-network bridge
+#          (config/otel-bridge.yaml), which re-exports gRPC + protobuf +
+#          TLS. That indirection is load-bearing: Cribl's OTel source
+#          accepts BINARY PROTOBUF only — OTLP/JSON gets a 501
+#          "unsupported Content-Type" (Cribl KB otlp-96/2135) — and
+#          Vector cannot emit OTLP protobuf (its native `opentelemetry`
+#          sink is unusable for traces, per vector.yaml's gallery note).
+#          Configure the Cribl source with Protocol: gRPC (its default);
+#          the protobuf wire format is name-free, so the source's OTLP
+#          version setting (0.10.0 included) parses modern spans fine.
+#          CRIBL_OTLP_ENDPOINT / CRIBL_OTLP_TOKEN are consumed by the
+#          bridge service, not by Vector.
+#
+# The `cribl_otlp_shape` transform below is a verbatim copy of the
+# live-verified `viewer_otlp_shape` wire re-serializer (only the scope
+# name differs); it is duplicated rather than shared so Cribl forwarding
+# never depends on the viewer overlay being loaded. The bridge's OTLP
+# receiver is the same parser the bundled Jaeger embeds, so the shape is
+# proven against it.
+#
+# Enabled with the HEC endpoint unset, Vector fails loudly at startup —
+# that is deliberate. Check: ./compose.sh logs -f vector
+#
+# Before forwarding run-plane traces off-box, consider
+# OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=NO_CONTENT in .env:
+# by default those spans carry LLM prompt/completion content.
+# ============================================================================
+
+transforms:
+  cribl_otlp_shape:
+    type: remap
+    inputs:
+      - otlp.traces
+    source: |
+      attrs = []
+      for_each(object(.attributes) ?? {}) -> |k, v| {
+        val = {"stringValue": to_string(v) ?? ""}
+        if is_boolean(v) {
+          val = {"boolValue": v}
+        } else if is_integer(v) {
+          val = {"intValue": to_string(v) ?? "0"}
+        } else if is_float(v) {
+          val = {"doubleValue": v}
+        }
+        attrs = push(attrs, {"key": k, "value": val})
+      }
+      res_attrs = []
+      for_each(object(.resources) ?? {}) -> |k, v| {
+        res_attrs = push(res_attrs, {"key": k, "value": {"stringValue": to_string(v) ?? ""}})
+      }
+      # The OTLP source hands these over as VRL *timestamps*, not
+      # strings — `string!()` on one aborts the expression, and an
+      # abort swallowed by `?? now()` silently restamps every span with
+      # its ingest time (spans arrive in Jaeger with ~0 duration). Read
+      # the timestamp directly, and keep the string/integer branches for
+      # any source that spells them differently.
+      start_ts = 0
+      if is_timestamp(.start_time_unix_nano) {
+        start_ts = to_unix_timestamp(timestamp!(.start_time_unix_nano), unit: "nanoseconds")
+      } else if is_integer(.start_time_unix_nano) {
+        start_ts = int!(.start_time_unix_nano)
+      } else {
+        start_ts = to_unix_timestamp(parse_timestamp(to_string(.start_time_unix_nano) ?? "", "%+") ?? now(), unit: "nanoseconds")
+      }
+      end_ts = 0
+      if is_timestamp(.end_time_unix_nano) {
+        end_ts = to_unix_timestamp(timestamp!(.end_time_unix_nano), unit: "nanoseconds")
+      } else if is_integer(.end_time_unix_nano) {
+        end_ts = int!(.end_time_unix_nano)
+      } else {
+        end_ts = to_unix_timestamp(parse_timestamp(to_string(.end_time_unix_nano) ?? "", "%+") ?? now(), unit: "nanoseconds")
+      }
+      evts = []
+      for_each(array(.events) ?? []) -> |_i, ev| {
+        ev_attrs = []
+        for_each(object(ev.attributes) ?? {}) -> |k, v| {
+          val = {"stringValue": to_string(v) ?? ""}
+          if is_boolean(v) {
+            val = {"boolValue": v}
+          } else if is_integer(v) {
+            val = {"intValue": to_string(v) ?? "0"}
+          } else if is_float(v) {
+            val = {"doubleValue": v}
+          }
+          ev_attrs = push(ev_attrs, {"key": k, "value": val})
+        }
+        ev_ts = 0
+        if is_timestamp(ev.time_unix_nano) {
+          ev_ts = to_unix_timestamp(timestamp!(ev.time_unix_nano), unit: "nanoseconds")
+        } else if is_integer(ev.time_unix_nano) {
+          ev_ts = int!(ev.time_unix_nano)
+        } else {
+          ev_ts = to_unix_timestamp(parse_timestamp(to_string(ev.time_unix_nano) ?? "", "%+") ?? now(), unit: "nanoseconds")
+        }
+        evts = push(evts, {
+          "timeUnixNano": to_string(ev_ts),
+          "name": to_string(ev.name) ?? "",
+          "attributes": ev_attrs
+        })
+      }
+      span = {
+        "traceId": .trace_id,
+        "spanId": .span_id,
+        "name": .name,
+        "kind": .kind,
+        "startTimeUnixNano": to_string(start_ts),
+        "endTimeUnixNano": to_string(end_ts),
+        "attributes": attrs,
+        "status": {"code": to_int(.status.code) ?? 0}
+      }
+      if length(evts) > 0 {
+        span = set!(span, ["events"], evts)
+      }
+      parent = to_string(.parent_span_id) ?? ""
+      if parent != "" {
+        span = set!(span, ["parentSpanId"], parent)
+      }
+      . = {
+        "resourceSpans": [{
+          "resource": {"attributes": res_attrs},
+          "scopeSpans": [{
+            "scope": {"name": "librerun-cribl-forward"},
+            "spans": [span]
+          }]
+        }]
+      }
+
+sinks:
+  cribl_hec_logs:
+    type: splunk_hec_logs
+    inputs:
+      - otlp.logs
+      - backend_logs
+    endpoint: "${CRIBL_HEC_ENDPOINT:-}"
+    default_token: "${CRIBL_HEC_TOKEN:-}"
+    encoding:
+      codec: json
+
+  cribl_traces:
+    type: http
+    inputs:
+      - cribl_otlp_shape
+    # The in-network bridge (compose `cribl` profile) — NOT Cribl itself.
+    # It converts OTLP/JSON to the gRPC+protobuf Cribl requires and owns
+    # the Cribl endpoint, token, and TLS (config/otel-bridge.yaml).
+    uri: "http://otel-bridge:4318/v1/traces"
+    method: post
+    encoding:
+      codec: json
+    # One OTLP envelope per request: OTLP receivers take a single JSON
+    # document, so batching into an array would be rejected. Fine at
+    # demo/dev volumes; revisit for heavy production span rates.
+    batch:
+      max_events: 1
+    framing:
+      method: newline_delimited
+    request:
+      headers:
+        Content-Type: application/json

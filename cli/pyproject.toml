@@ -1,0 +1,48 @@
+# The `librerun` CLI (blueprint S6, default D5): stdlib Python, no runtime
+# dependency, so `pipx install` from git is instant and works on a machine
+# with Docker and nothing else.
+#
+#     pipx install "git+https://github.com/<owner>/<repo>#subdirectory=cli"
+#     librerun --help
+#
+# The templates under src/librerun/templates are package data: `init`
+# copies them with token substitution, so the CLI needs no checkout of
+# its own — only the LibreRun checkout it operates on (found by walking
+# up from the working directory to compose.yaml, or --root).
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "librerun"
+version = "1.1.0b1"
+description = "The LibreRun CLI: demo, up, down, logs, init, run, battery, doctor, key rotate."
+readme = "README.md"
+requires-python = ">=3.11"
+# The CLI is AGPL-3.0-only; the templates it ships and copies into a
+# new agent (src/librerun/templates/) are Apache-2.0 (NOTICE; the
+# licence scope map), so the distribution carries both.
+license = "AGPL-3.0-only AND Apache-2.0"
+authors = [{ name = "The LibreRun contributors" }]
+# Deliberately empty (D5). Everything the commands need — argparse,
+# urllib, subprocess, secrets, json — is in the standard library, and a
+# dependency here would be one more thing between a newcomer and the
+# hour path.
+dependencies = []
+
+[project.scripts]
+librerun = "librerun.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+# Every template file, recursively, whatever its suffix — a Dockerfile
+# has none, and a glob per suffix is how the next template's new file
+# type gets left out of the wheel.
+librerun = ["templates/**/*", "templates/*/*", "templates/*/*/*"]
+
+[tool.setuptools.exclude-package-data]
+# A build run from a tree where the templates' agent.py was byte-compiled
+# must not ship the cache as a template file.
+librerun = ["**/__pycache__/*", "**/*.pyc"]

@@ -1,0 +1,526 @@
+# The hour path, in CI, once per template (blueprint S6; delight gate
+# D8–D10): install the CLI the way a newcomer does, start the demo,
+# `librerun init` an agent from the template, `librerun up`, run its
+# sample to completion, prove it with `librerun battery`, break its output
+# on purpose, watch the battery go red WITH A REASON, revert, and watch it
+# go green again. Three templates, one matrix, and one red entry must not
+# hide the other two.
+#
+# Two more jobs carry the rest of the batch's Accept: `key rotate` on the
+# echo example, with the old key accepted by the gateway until `--finish`
+# and refused after it and the two containers' ids compared before and
+# after each step; and `librerun doctor` failing loudly on a machine with
+# no engine and on one whose daemon does not answer — each proven against
+# the same doctor passing when the engine is there, so a doctor that
+# always failed could not pass either.
+#
+# No `paths:` filter: like `librerun-smoke`, this boots the whole stack,
+# and everything from the compose files to the SDK to the templates is an
+# input to what it proves.
+name: template-matrix
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: template-matrix-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  hour-path:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      # One red template must not hide the other two.
+      fail-fast: false
+      matrix:
+        include:
+          - template: langgraph
+            agent: my-agent
+            # In-process: the battery bind-mounts the source over the
+            # image's copy, so a break needs no rebuild to show.
+            rebuild_after_edit: "false"
+            # D8 literally: the demo first, then init, then `up` on a
+            # RUNNING stack — the backend is rebuilt and recreated hot.
+            order: hot
+            break_reason: "produced no structured output"
+            # In-process. The adapter battery serves no `run.mcp.url`
+            # at all, so there is no `mcp` check to report — and the
+            # step below holds it to that, so a future change that
+            # starts advertising one here has to say so.
+            expect_mcp: "absent"
+          - template: container-python
+            agent: my-py-agent
+            # A container is the artifact: an edit shows after `up`.
+            rebuild_after_edit: "true"
+            order: cold
+            break_reason: "must return a dict"
+            # `agent.py` calls `ctx.pii.redact` on the note it
+            # "fetched", so a reachable endpoint MUST be called.
+            expect_mcp: "pass"
+          - template: container-ts
+            agent: my-ts-agent
+            rebuild_after_edit: "true"
+            order: cold
+            break_reason: "not a JSON object"
+            # `agent.ts` has its own `redact` over `run.mcp.url` and
+            # warns rather than dying when it is unreachable — which is
+            # correct, and is exactly what hid this for two releases.
+            expect_mcp: "pass"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The whole history, not the default shallow checkout: pipx
+          # installs the CLI from this checkout as a git URL, and pip
+          # clones a git URL with `--filter=blob:none`, which HANGS when
+          # the source repository is shallow (measured: pack-objects
+          # `--shallow` never returns; from a complete repository the
+          # same install takes seconds). A newcomer's `git clone` is
+          # complete, so a complete checkout is the honest reproduction.
+          fetch-depth: 0
+
+      # `pipx install git+<repo>#subdirectory=cli` on a clean machine is
+      # the Accept item. The runner is that machine; the repository is
+      # the checkout, addressed as a git URL, so the `#subdirectory=`
+      # mechanism is what is exercised rather than a path install.
+      - name: Install the CLI the way a newcomer does
+        run: |
+          set -euo pipefail
+          pipx --version
+          pipx install "git+file://$PWD#subdirectory=cli"
+          librerun --version
+          librerun --help >/dev/null
+          test ! -f .env
+
+      - name: The demo (hot), or only its environment (cold)
+        id: demo
+        run: |
+          set -euo pipefail
+          start=$(date +%s)
+          if [ "${{ matrix.order }}" = hot ]; then
+            librerun demo
+          else
+            librerun demo --env-only
+          fi
+          echo "seconds=$(( $(date +%s) - start ))" >> "$GITHUB_OUTPUT"
+
+      - name: librerun init
+        id: init
+        run: |
+          set -euo pipefail
+          start=$(date +%s)
+          librerun init ${{ matrix.agent }} --template ${{ matrix.template }}
+          echo "seconds=$(( $(date +%s) - start ))" >> "$GITHUB_OUTPUT"
+          test -f backend/agents/$(echo ${{ matrix.agent }} | tr - _)/agent.yaml
+
+      - name: librerun up
+        id: up
+        run: |
+          set -euo pipefail
+          start=$(date +%s)
+          librerun up
+          echo "seconds=$(( $(date +%s) - start ))" >> "$GITHUB_OUTPUT"
+
+      # D8: the new agent appears with its sample and completes. The run
+      # is followed to `complete` by the CLI; then the run's own output
+      # is read back to check that the model call went THROUGH THE
+      # GATEWAY keyless — `answer_source` is `stub-fixture`, the label a
+      # template writes only when the gateway's envelope named the stub.
+      # A run that completed on its rule alone would say `rules`.
+      - name: The agent appears with its sample, and completes
+        id: run
+        run: |
+          set -euo pipefail
+          start=$(date +%s)
+          librerun run --agent ${{ matrix.agent }} --wait --approve --timeout 600 | tee run.log
+          echo "seconds=$(( $(date +%s) - start ))" >> "$GITHUB_OUTPUT"
+          python3 - <<'PY'
+          import json, re, sys, urllib.request
+          # The credentials the CLI used: read from .env line by line,
+          # never sourced (bash would evaluate the generated password).
+          env = {}
+          for line in open(".env"):
+              line = line.strip()
+              if line and not line.startswith("#") and "=" in line:
+                  k, v = line.split("=", 1)
+                  env[k] = v
+          run_id = re.search(r"api:\s+http://[^/]+/api/v1/runs/([0-9a-f-]+)", open("run.log").read()).group(1)
+          def call(method, path, token=None, body=None):
+              data = json.dumps(body).encode() if body is not None else None
+              req = urllib.request.Request(f"http://localhost:8000/api/v1{path}", data=data, method=method)
+              req.add_header("Content-Type", "application/json")
+              if token:
+                  req.add_header("Authorization", f"Bearer {token}")
+              with urllib.request.urlopen(req, timeout=30) as r:
+                  return json.loads(r.read() or b"{}")
+          token = call("POST", "/auth/login", body={"email": env["INITIAL_ADMIN_EMAIL"], "password": env["INITIAL_ADMIN_PASSWORD"]})["access_token"]
+          detail = call("GET", f"/runs/{run_id}", token=token)
+          assert detail["status"] == "complete", detail.get("status")
+          out = detail.get("structured_output") or {}
+          print("structured_output:", json.dumps(out)[:400])
+          assert out.get("answer_source") == "stub-fixture", (
+              f"answer_source is {out.get('answer_source')!r}: the model call did not go "
+              f"through the gateway keyless (the template labels the stub's reply stub-fixture "
+              f"and a rule-only answer rules)"
+          )
+          print(f"{'${{ matrix.agent }}'}: complete, answered through the gateway's stub")
+          PY
+
+      - name: librerun battery — green
+        id: battery
+        run: |
+          set -euo pipefail
+          start=$(date +%s)
+          librerun battery --agent ${{ matrix.agent }} --json | tee battery-green.log
+          echo "seconds=$(( $(date +%s) - start ))" >> "$GITHUB_OUTPUT"
+          grep -q '"passed": true' battery-green.log
+
+      # The callback really happened, on the path the CLI drives.
+      #
+      # `librerun battery` runs the driver in a ONE-OFF `compose run`
+      # container, and compose does NOT give such a container the
+      # service's network aliases (`--use-aliases` is opt-in and this
+      # CLI never passed it). So the driver advertised `backend`, which
+      # from inside an agent names the LONG-RUNNING backend container,
+      # where nothing listens on the driver's ephemeral port. Both
+      # container templates call `redact` over `run.mcp.url` and both
+      # DEGRADE rather than die when it is unreachable — correct
+      # behaviour, and precisely what kept this job green while the
+      # callback never once happened. `mcp: skip` is a legal verdict,
+      # so nothing was red; it was simply never looked at.
+      #
+      # A green battery is therefore not evidence here. The verdict is.
+      - name: The capability callback happened, not just the battery passing
+        run: |
+          set -euo pipefail
+          python3 - "${{ matrix.expect_mcp }}" <<'PY'
+          import json, re, sys
+
+          expected = sys.argv[1]
+          text = open("battery-green.log", encoding="utf-8", errors="replace").read()
+          # The report is neither the first thing in this file nor the
+          # last. `--json` does not mean json-only: the CLI's own lines
+          # and the battery's summary come before it, and `say("battery:
+          # green")` comes AFTER — which is why every other step in this
+          # job greps rather than parses. Slicing to the last `{` at
+          # column 0 and calling `json.loads` therefore died on
+          # "Extra data", on all three templates, measured.
+          #
+          # `raw_decode` reads ONE value and ignores what follows, so the
+          # trailing line costs nothing. Candidates are tried newest
+          # first and must look like a report, so a stray object in the
+          # chatter cannot be mistaken for one.
+          report = None
+          for off in reversed([m.start() for m in re.finditer(r"(?m)^\{", text)]):
+              try:
+                  value, _ = json.JSONDecoder().raw_decode(text[off:])
+              except ValueError:
+                  continue
+              if isinstance(value, dict) and "passed" in value:
+                  report = value
+                  break
+          # Not a silent pass: a truncated, empty or report-less log would
+          # otherwise satisfy the `absent` branch below by having nothing
+          # in it, and this step would pass having read nothing.
+          if report is None:
+              sys.exit("::error::no battery report found in battery-green.log — this step looked at nothing")
+
+          verdict = (report.get("checks") or {}).get("mcp", "absent")
+          if verdict != expected:
+              sys.exit(
+                  f"::error::mcp check is {verdict!r}, expected {expected!r}. "
+                  f"`skip` means the agent never called back, so the URL the "
+                  f"battery advertised did not reach the battery."
+              )
+          # `pass` and an empty ledger would mean the verdict and the
+          # record disagree, and the ledger is the half a reader can check.
+          calls = report.get("mcp") or []
+          if expected == "pass" and not calls:
+              sys.exit("::error::mcp is `pass` but no request was recorded")
+          if expected == "absent" and calls:
+              sys.exit(f"::error::no mcp verdict, yet {len(calls)} request(s) were recorded")
+          print(f"mcp={verdict} as expected; {len(calls)} request(s) recorded")
+          PY
+
+      # D9: break the agent's output on purpose — the edit each
+      # template's README names — and expect red WITH THE REASON. The
+      # edit is an exact replacement that fails if the template's text
+      # moved, so a break that silently did nothing cannot pass.
+      - name: Break the agent's output
+        run: |
+          set -euo pipefail
+          dir="backend/agents/$(echo ${{ matrix.agent }} | tr - _)"
+          cp -r "$dir" /tmp/agent-before-the-break
+          python3 - "$dir" "${{ matrix.template }}" <<'PY'
+          import re, sys
+          from pathlib import Path
+          directory, template = Path(sys.argv[1]), sys.argv[2]
+          # The anchor is the output block each template's README names;
+          # the count check makes a break that found nothing a failure.
+          if template == "langgraph":
+              path = directory / "agent.py"
+              anchor = r'    return \{\n        "structured": \{\n(?:.*\n)*?    \}\n'
+              new = '    return {"structured": {}}\n'
+          elif template == "container-python":
+              path = directory / "agent.py"
+              anchor = r'    return \{\n        "question": question,\n(?:.*\n)*?    \}\n'
+              new = '    return ["broken"]\n'
+          else:
+              path = directory / "server.ts"
+              anchor = r'  inv\.output = \{\n(?:.*\n)*?  \};\n'
+              new = '  inv.output = ["broken"] as unknown as Record<string, unknown>;\n'
+          text = path.read_text()
+          matches = re.findall(anchor, text)
+          assert len(matches) == 1, f"the break did not find its anchor in {path} ({len(matches)} matches)"
+          path.write_text(re.sub(anchor, new, text, count=1))
+          print(f"broke {path}")
+          PY
+
+      - name: Rebuild, when the container is the artifact
+        if: matrix.rebuild_after_edit == 'true'
+        run: librerun up --quiet
+
+      - name: librerun battery — red, with a readable reason
+        id: red
+        run: |
+          set -euo pipefail
+          start=$(date +%s)
+          set +e
+          librerun battery --agent ${{ matrix.agent }} --json > battery-red.log 2>&1
+          status=$?
+          set -e
+          cat battery-red.log
+          echo "seconds=$(( $(date +%s) - start ))" >> "$GITHUB_OUTPUT"
+          if [ "$status" -eq 0 ]; then
+            echo "::error::the battery passed a broken agent — it is not looking"
+            exit 1
+          fi
+          grep -q '"passed": false' battery-red.log
+          grep -q -- "${{ matrix.break_reason }}" battery-red.log \
+            || { echo "::error::the battery is red but its report does not say why (expected: ${{ matrix.break_reason }})"; exit 1; }
+
+      - name: Revert, and green again
+        run: |
+          set -euo pipefail
+          dir="backend/agents/$(echo ${{ matrix.agent }} | tr - _)"
+          rm -rf "$dir"
+          cp -r /tmp/agent-before-the-break "$dir"
+          if [ "${{ matrix.rebuild_after_edit }}" = "true" ]; then librerun up --quiet; fi
+          librerun battery --agent ${{ matrix.agent }} --json | tee battery-again.log
+          grep -q '"passed": true' battery-again.log
+
+      # K4b: doctor signs in with the password on stdin, never argv, and
+      # only to the stack the engine says is this checkout's (`compose ps`,
+      # #134) once /api/v1/meta answers as LibreRun — so the line below is
+      # the whole chain on a real stack. `--password` is refused outright.
+      - name: librerun doctor on the running stack, signed in
+        run: |
+          set -euo pipefail
+          # The demo's admin, read from .env line by line and never
+          # sourced: bash would evaluate the generated password.
+          email=$(sed -n 's/^INITIAL_ADMIN_EMAIL=//p' .env | tail -n 1)
+          password=$(sed -n 's/^INITIAL_ADMIN_PASSWORD=//p' .env | tail -n 1)
+          test -n "$email" && test -n "$password"
+          printf '%s\n' "$password" | librerun doctor --email "$email" --password-stdin | tee doctor.log
+          grep -q "registered: ${{ matrix.agent }}" doctor.log
+          grep -qF "signed in as $email; platform admin: yes" doctor.log \
+            || { echo "::error::doctor did not sign in to this checkout's stack as its platform admin"; exit 1; }
+          set +e
+          librerun doctor --password x > doctor-argv.log 2>&1
+          status=$?
+          set -e
+          cat doctor-argv.log
+          [ "$status" -eq 2 ] || { echo "::error::doctor --password exited $status, not 2"; exit 1; }
+
+      # D8–D10 are TIMED steps of the delight gate; the timings here are
+      # the ones the delight gate records.
+      - name: Timings
+        if: always()
+        run: |
+          {
+            echo "## ${{ matrix.template }} — the hour path"
+            echo
+            echo "| Step | Seconds |"
+            echo "|---|---|"
+            echo "| demo (${{ matrix.order }}) | ${{ steps.demo.outputs.seconds }} |"
+            echo "| init | ${{ steps.init.outputs.seconds }} |"
+            echo "| up | ${{ steps.up.outputs.seconds }} |"
+            echo "| run --wait | ${{ steps.run.outputs.seconds }} |"
+            echo "| battery (green) | ${{ steps.battery.outputs.seconds }} |"
+            echo "| battery (red) | ${{ steps.red.outputs.seconds }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Tear down
+        if: always()
+        run: librerun down --volumes || true
+
+  key-rotation:
+    # `key rotate` on the echo agent (the batch's Accept): the old key is
+    # accepted by the gateway until `--finish` and refused after it; the
+    # echo container is recreated by `rotate` (its environment shows the
+    # new key) and left alone by `--finish` (its id unchanged, the
+    # gateway's not).
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The whole history, not the default shallow checkout: pipx
+          # installs the CLI from this checkout as a git URL, and pip
+          # clones a git URL with `--filter=blob:none`, which HANGS when
+          # the source repository is shallow (measured: pack-objects
+          # `--shallow` never returns; from a complete repository the
+          # same install takes seconds). A newcomer's `git clone` is
+          # complete, so a complete checkout is the honest reproduction.
+          fetch-depth: 0
+
+      - name: Install the CLI and start the demo
+        run: |
+          set -euo pipefail
+          pipx install "git+file://$PWD#subdirectory=cli"
+          test ! -f .env
+          librerun demo
+
+      - name: Rotate, and both keys work
+        run: |
+          set -euo pipefail
+          models() { curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $1" http://localhost:8090/v1/models; }
+          healthy() {
+            for i in $(seq 1 60); do
+              if curl -fsS http://localhost:8090/healthz >/dev/null 2>&1 \
+                 && [ "$(docker inspect -f '{{.State.Running}}' librerun-echo-agent)" = true ]; then return 0; fi
+              sleep 2
+            done
+            echo "::error::the gateway or the echo container did not come back"; exit 1
+          }
+          # `librerun demo` returns on the BACKEND's health alone, and
+          # compose starts the gateway with `service_started`, on purpose
+          # (§12 192(b)). So nothing has waited for the gateway yet, and the
+          # first assertion below read "000" on a slow boot: red twice on
+          # one K4 commit, green on the next, the job's code unchanged. K4
+          # named this one-line fix and it was never applied (S10).
+          healthy
+          old=$(grep '^LIBRERUN_AGENT_KEY_ECHO_V1=' .env | cut -d= -f2)
+          [ -n "$old" ]
+          echo "old key accepted before the rotation: $(models "$old")"
+          [ "$(models "$old")" = 200 ]
+          echo_before=$(docker inspect -f '{{.Id}}' librerun-echo-agent)
+          gateway_before=$(docker inspect -f '{{.Id}}' librerun-gateway)
+
+          librerun key rotate echo-v1
+          healthy
+
+          new=$(grep '^LIBRERUN_AGENT_KEY_ECHO_V1=' .env | cut -d= -f2)
+          previous=$(grep '^LIBRERUN_AGENT_KEY_ECHO_V1_PREVIOUS=' .env | cut -d= -f2)
+          [ "$previous" = "$old" ] || { echo "::error::_PREVIOUS does not carry the old value"; exit 1; }
+          [ "$new" != "$old" ] && [[ "$new" == lr_agent_* ]]
+
+          echo_after=$(docker inspect -f '{{.Id}}' librerun-echo-agent)
+          gateway_after=$(docker inspect -f '{{.Id}}' librerun-gateway)
+          [ "$echo_after" != "$echo_before" ] || { echo "::error::rotate did not recreate the echo container"; exit 1; }
+          [ "$gateway_after" != "$gateway_before" ] || { echo "::error::rotate did not recreate the gateway"; exit 1; }
+          echo_env="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' librerun-echo-agent)"
+          grep -qx "OPENAI_API_KEY=$new" <<< "$echo_env" \
+            || { echo "::error::the recreated echo container does not carry the new key"; exit 1; }
+
+          echo "after rotate: old=$(models "$old") new=$(models "$new")"
+          [ "$(models "$old")" = 200 ] || { echo "::error::the old key is refused before --finish"; exit 1; }
+          [ "$(models "$new")" = 200 ] || { echo "::error::the new key is refused"; exit 1; }
+
+          # And the agent still completes a run on its new key.
+          librerun run --agent echo-v1 --wait --approve --timeout 600
+
+          echo "ECHO_AFTER_ROTATE=$echo_after" >> "$GITHUB_ENV"
+          echo "GATEWAY_AFTER_ROTATE=$gateway_after" >> "$GITHUB_ENV"
+          echo "OLD_KEY=$old" >> "$GITHUB_ENV"
+          echo "NEW_KEY=$new" >> "$GITHUB_ENV"
+
+      - name: Finish, and only the new key works
+        run: |
+          set -euo pipefail
+          models() { curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $1" http://localhost:8090/v1/models; }
+          librerun key rotate echo-v1 --finish
+          for i in $(seq 1 60); do
+            curl -fsS http://localhost:8090/healthz >/dev/null 2>&1 && break
+            sleep 2
+          done
+          ! grep -q '^LIBRERUN_AGENT_KEY_ECHO_V1_PREVIOUS=' .env || { echo "::error::the _PREVIOUS line survived --finish"; exit 1; }
+          echo_final=$(docker inspect -f '{{.Id}}' librerun-echo-agent)
+          gateway_final=$(docker inspect -f '{{.Id}}' librerun-gateway)
+          [ "$echo_final" = "$ECHO_AFTER_ROTATE" ] || { echo "::error::--finish recreated the echo container; its environment had not changed"; exit 1; }
+          [ "$gateway_final" != "$GATEWAY_AFTER_ROTATE" ] || { echo "::error::--finish did not recreate the gateway"; exit 1; }
+          echo "after finish: old=$(models "$OLD_KEY") new=$(models "$NEW_KEY")"
+          [ "$(models "$OLD_KEY")" = 401 ] || { echo "::error::the old key is still accepted after --finish"; exit 1; }
+          [ "$(models "$NEW_KEY")" = 200 ] || { echo "::error::the new key is refused after --finish"; exit 1; }
+
+      - name: Tear down
+        if: always()
+        run: librerun down --volumes || true
+
+  doctor-without-an-engine:
+    # `librerun doctor` fails loudly without Docker (the batch's Accept),
+    # in both shapes a newcomer meets: no engine on PATH, and an engine
+    # whose daemon does not answer. Each is proven against the positive
+    # control — the same doctor on the same runner with its engine
+    # reachable exits 0 — so a doctor that always failed could not pass.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The whole history, not the default shallow checkout: pipx
+          # installs the CLI from this checkout as a git URL, and pip
+          # clones a git URL with `--filter=blob:none`, which HANGS when
+          # the source repository is shallow (measured: pack-objects
+          # `--shallow` never returns; from a complete repository the
+          # same install takes seconds). A newcomer's `git clone` is
+          # complete, so a complete checkout is the honest reproduction.
+          fetch-depth: 0
+
+      - name: Install the CLI, twice over
+        # From the git URL with `#subdirectory=` (the documented form) and
+        # from the path (`--force` over it), so both install shapes work.
+        run: |
+          set -euo pipefail
+          pipx install "git+file://$PWD#subdirectory=cli"
+          pipx install --force ./cli
+          librerun --version
+
+      - name: Positive control — with an engine, doctor passes
+        run: |
+          set -euo pipefail
+          librerun doctor | tee doctor-ok.log
+          grep -q "daemon answers" doctor-ok.log
+
+      - name: No engine on PATH — doctor fails loudly
+        run: |
+          set -euo pipefail
+          # The pipx script's shebang is its own venv's interpreter, so an
+          # empty PATH removes docker and podman and nothing else.
+          set +e
+          env -i HOME="$HOME" PATH=/nonexistent "$(command -v librerun)" doctor > doctor-none.log 2>&1
+          status=$?
+          set -e
+          cat doctor-none.log
+          [ "$status" -ne 0 ] || { echo "::error::doctor exited 0 with no engine on PATH"; exit 1; }
+          grep -q "no container engine" doctor-none.log
+
+      - name: Engine present, daemon unreachable — doctor fails loudly
+        # COMPOSE_ENGINE pins docker, as it pins compose.sh: the runner
+        # also carries podman, and without the pin the report would fall
+        # through to it exactly as the wrapper would.
+        run: |
+          set -euo pipefail
+          set +e
+          COMPOSE_ENGINE=docker DOCKER_HOST=unix:///nonexistent/docker.sock librerun doctor > doctor-dead.log 2>&1
+          status=$?
+          set -e
+          cat doctor-dead.log
+          [ "$status" -ne 0 ] || { echo "::error::doctor exited 0 with the daemon unreachable"; exit 1; }
+          grep -q "daemon does not answer" doctor-dead.log

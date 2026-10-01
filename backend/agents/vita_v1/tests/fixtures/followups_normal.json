@@ -1,0 +1,17 @@
+[
+  {
+    "question": "What are the current field normalization settings in the Cribl Stream configuration for the `_time` field?",
+    "rationale": "Understanding the current configuration will help determine if the `_time` field is being correctly mapped to `@timestamp` with millisecond precision, as recommended in the resolution plan.",
+    "expected_impact": "If the settings are incorrect, the recommendation would be to adjust them to ensure proper timestamp mapping, which could resolve the data ingestion discrepancies."
+  },
+  {
+    "question": "Have there been any recent changes to the Cribl Stream or Elasticsearch configurations, such as upgrades or modifications to the data transformation pipeline?",
+    "rationale": "Identifying recent changes can help pinpoint if a specific modification triggered the issue, allowing for targeted troubleshooting.",
+    "expected_impact": "If a recent change is identified as the cause, the recommendation would include reverting or adjusting that change to restore proper functionality."
+  },
+  {
+    "question": "Can you provide details on the network topology, including any load balancers or proxies between Cribl Stream and Elasticsearch?",
+    "rationale": "Network components can introduce latency or alter data packets, potentially affecting timestamp precision and data flow.",
+    "expected_impact": "If network components are impacting data transmission, the recommendation would include optimizing or reconfiguring these components to ensure seamless data flow."
+  }
+]

@@ -1,0 +1,25 @@
+# Blank issues stay enabled: a report that fits no form is still a report,
+# and a contributor who has to pick the wrong form usually picks silence.
+#
+# The URLs below are ABSOLUTE, at the public repository, not relative.
+# GitHub validates this file against a schema that wants a URL here, and an
+# invalid config.yml does not degrade politely — it takes the whole template
+# chooser with it. A relative path would be quietly wrong for ever.
+blank_issues_enabled: true
+contact_links:
+  - name: Report a vulnerability (private)
+    url: https://github.com/JeremiahJRRoss/librerun/security/advisories/new
+    about: >
+      Never in a public issue. GitHub private vulnerability reporting opens an
+      advisory only the maintainers and you can read. If the button is not
+      there, SECURITY.md in the repository has the other route.
+  - name: Trademark permission request
+    url: https://github.com/JeremiahJRRoss/librerun/blob/main/TRADEMARKS.md
+    about: >
+      What you may call your fork, product or integration without asking, and
+      how to ask when you do need permission.
+  - name: Writing an agent
+    url: https://github.com/JeremiahJRRoss/librerun/blob/main/docs/authoring/Quickstart.md
+    about: >
+      The hour path: install the CLI, scaffold an agent from a template, run it,
+      and pass the battery.

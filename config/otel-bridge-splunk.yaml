@@ -1,0 +1,52 @@
+# ============================================================================
+# LibreRun — OTLP protobuf bridge, Splunk leg (blueprint S7a)
+#
+# Selected by LIBRERUN_OBS_VENDOR=splunk: compose points the bridge at
+# this file instead of config/otel-bridge.yaml (the Cribl leg). One
+# stock OpenTelemetry Collector doing exactly one spec-defined job:
+#
+#   vector (splunk_traces sink, OTLP/JSON over HTTP, in-network)
+#     --> this bridge :4318 /v1/traces
+#     --> OTLP HTTP + protobuf + TLS --> Splunk Observability ingest
+#
+# That indirection is load-bearing: Splunk Observability's OTLP trace
+# path, /v2/trace/otlp, documents `Content-Type:
+# application/x-protobuf`, and Vector has no OTLP protobuf encoder (its
+# native `opentelemetry` sink is unusable for traces, per the note in
+# vector.yaml's sink gallery).
+#
+# SPLUNK_OTLP_URL is the ingest URL with its path, e.g.
+# https://ingest.<realm>.observability.splunkcloud.com/v2/trace/otlp.
+# `traces_endpoint` rather than `endpoint` because the URL is given
+# whole AND its path is not /v1/traces — `endpoint` would build the
+# wrong URL either way.
+#
+# X-SF-Token is the header Splunk documents for the org access token —
+# a DIFFERENT credential from the HEC token the log leg uses.
+#
+# Runs only with the `obs` compose profile; never publishes a port —
+# the only listener is on the compose network. An empty SPLUNK_OTLP_URL
+# stops the bridge at start-up with a named error rather than starting
+# something that drops every span.
+# ============================================================================
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+exporters:
+  otlphttp:
+    traces_endpoint: ${env:SPLUNK_OTLP_URL}
+    headers:
+      x-sf-token: "${env:SPLUNK_ACCESS_TOKEN}"
+
+service:
+  telemetry:
+    logs:
+      level: warn
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [otlphttp]

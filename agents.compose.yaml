@@ -1,0 +1,128 @@
+# Agent containers (blueprint S4). Included by compose.yaml; one service
+# per container agent, each on the internal ``agents`` network only:
+#
+#   - the chassis backend sits on ``agents`` beside its default network,
+#     so the Run Contract (backend -> agent) and the run-scoped MCP server
+#     and OTLP relay (agent -> backend, http://backend:8000) work;
+#   - Vector, Postgres and Redis do not, and an internal network has no
+#     NAT route off the host: no path from an agent to Vector exists but
+#     the relay, and none to the Internet at all. An agent that needs
+#     outbound access adds the non-internal ``egress`` network here AND
+#     declares ``network.egress: true`` in its manifest (the admin page
+#     shows the opt-out);
+#   - ``logging: driver: none`` — Docker persists no agent stdout or
+#     stderr; ``docker logs <agent>`` is empty by construction. The SDK
+#     turns a print() into a run-plane log record under the invocation's
+#     trace, delivered through the relay; a container without the SDK uses
+#     the Run Contract ``log`` event or the relay;
+#   - ``labels: librerun.agent_id`` is how the CLI maps an agent to its
+#     service;
+#   - OTEL_EXPORTER_OTLP_ENDPOINT points at the chassis relay and carries
+#     no credential: the run token travels with each invocation;
+#   - OPENAI_API_KEY holds the agent's LIBRERUN GATEWAY key, never a
+#     provider key (blueprint S4a, D10). It names an agent and nothing
+#     else, so it authenticates GET /v1/models alone and every model call
+#     needs the invocation's run token beside it — which the SDK sends.
+#
+# Three example containers, one shape (blueprint S5-R): the reference
+# echo agent on the Python SDK, a LlamaIndex Workflow, and a TypeScript
+# server that implements the Run Contract itself. ``librerun init``
+# (S6) emits a fragment of this shape for a new agent.
+services:
+  echo-agent:
+    image: ${LIBRERUN_IMAGE_PREFIX:-localhost/librerun}/librerun-example-echo:${LIBRERUN_IMAGE_TAG:-dev}
+    pull_policy: build
+    build:
+      # The repository root: the SDK installs from sdk/python/librerun-agent.
+      context: .
+      dockerfile: backend/agents/_examples/echo_container/Dockerfile
+    container_name: librerun-echo-agent
+    # The demo profile (scripts/demo.sh) runs the reference echo agent;
+    # the backend reaches it as ECHO_AGENT_URL=http://echo-agent:8090.
+    profiles: ["demo"]
+    labels:
+      librerun.agent_id: echo-v1
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://backend:8000/api/v1/_o/otlp
+      OTEL_SERVICE_NAME: echo-v1
+      # The LLM gateway (blueprint S4a). Both spellings on purpose: an
+      # SDK agent reads LIBRERUN_GATEWAY_URL, and a framework that only
+      # knows how to talk to OpenAI reads OPENAI_BASE_URL — pointing it
+      # at the gateway is the whole integration for such a framework.
+      LIBRERUN_GATEWAY_URL: http://gateway:8090
+      OPENAI_BASE_URL: http://gateway:8090/v1
+      # The per-agent key, NOT a provider key. `:?` rather than `:-`: an
+      # unprovisioned agent must stop `up` with a named error instead of
+      # starting a container whose every model call is refused, which
+      # looks like a model outage rather than a missing line in .env.
+      OPENAI_API_KEY: ${LIBRERUN_AGENT_KEY_ECHO_V1:?agent key not provisioned — run scripts/demo.sh, or add LIBRERUN_AGENT_KEY_ECHO_V1 to .env}
+    networks:
+      - agents
+      # - egress   # only with ``network.egress: true`` in agent.yaml
+    logging:
+      driver: none
+    restart: unless-stopped
+
+  llamaindex-agent:
+    image: ${LIBRERUN_IMAGE_PREFIX:-localhost/librerun}/librerun-example-llamaindex:${LIBRERUN_IMAGE_TAG:-dev}
+    pull_policy: build
+    build:
+      # The repository root, like the echo agent: the SDK installs from
+      # sdk/python/librerun-agent and the example's own requirements from
+      # its directory.
+      context: .
+      dockerfile: backend/agents/_examples/llamaindex_summarize/Dockerfile
+    container_name: librerun-llamaindex-agent
+    # The backend reaches it as LLAMAINDEX_AGENT_URL=http://llamaindex-agent:8090.
+    profiles: ["demo"]
+    labels:
+      librerun.agent_id: llamaindex-summarize
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://backend:8000/api/v1/_o/otlp
+      OTEL_SERVICE_NAME: llamaindex-summarize
+      LIBRERUN_GATEWAY_URL: http://gateway:8090
+      OPENAI_BASE_URL: http://gateway:8090/v1
+      # The per-agent key, NOT a provider key — LlamaIndex reads it as
+      # an OpenAI key and it is a LibreRun gateway key (blueprint S4a,
+      # D10). `:?` so an unprovisioned agent stops `up` by name.
+      OPENAI_API_KEY: ${LIBRERUN_AGENT_KEY_LLAMAINDEX_SUMMARIZE:?agent key not provisioned — run scripts/demo.sh, or add LIBRERUN_AGENT_KEY_LLAMAINDEX_SUMMARIZE to .env}
+    networks:
+      - agents
+      # - egress   # only with ``network.egress: true`` in agent.yaml
+    logging:
+      driver: none
+    restart: unless-stopped
+
+  vercel-agent:
+    image: ${LIBRERUN_IMAGE_PREFIX:-localhost/librerun}/librerun-example-vercel-ai:${LIBRERUN_IMAGE_TAG:-dev}
+    pull_policy: build
+    build:
+      # The repository root too, so every example's build line has the
+      # same shape — this one copies nothing but its own directory.
+      context: .
+      dockerfile: backend/agents/_examples/vercel_ai_answer_ts/Dockerfile
+    container_name: librerun-vercel-agent
+    # The backend reaches it as VERCEL_AGENT_URL=http://vercel-agent:8090.
+    profiles: ["demo"]
+    labels:
+      librerun.agent_id: vercel-answer
+    environment:
+      # This container ships no OTLP exporter: it serves the Run Contract
+      # directly and the TypeScript package that would export for it is
+      # v1.1 (L20). Its work is still in the run's one trace — the
+      # chassis phase span around the invocation and the gateway's LLM
+      # span under it — so the endpoint is left unset rather than set to
+      # something nothing reads.
+      OTEL_SERVICE_NAME: vercel-answer
+      LIBRERUN_GATEWAY_URL: http://gateway:8090
+      OPENAI_BASE_URL: http://gateway:8090/v1
+      # The per-agent key, NOT a provider key: the Vercel AI SDK's
+      # `createOpenAI({ apiKey })` is handed a LibreRun gateway key, and
+      # every model call carries the invocation's run token beside it.
+      OPENAI_API_KEY: ${LIBRERUN_AGENT_KEY_VERCEL_ANSWER:?agent key not provisioned — run scripts/demo.sh, or add LIBRERUN_AGENT_KEY_VERCEL_ANSWER to .env}
+    networks:
+      - agents
+      # - egress   # only with ``network.egress: true`` in agent.yaml
+    logging:
+      driver: none
+    restart: unless-stopped

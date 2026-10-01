@@ -1,0 +1,14 @@
+{
+  "avoidance": {
+    "text": "To prevent this issue from recurring, implement a comprehensive monitoring strategy that includes setting up alerts for any data ingestion errors related to timestamp parsing. Configure Elasticsearch to log detailed error messages for failed ingestions, which can be achieved by adjusting the log settings to capture parsing errors [39]. Additionally, conduct regular reviews of the Cribl Stream and Elasticsearch configurations to ensure that all field mappings and data formats remain consistent with the latest schema requirements [31].",
+    "citations": [39, 31]
+  },
+  "mitigation": {
+    "text": "Immediately adjust the Cribl Stream configuration to ensure that the data transformation pipeline is correctly mapping the `_time` field to `@timestamp` with millisecond precision. This can be done by accessing the Cribl Stream UI, navigating to the Elasticsearch Destination settings, and verifying that the field normalization settings are correctly applied [11]. Additionally, increase the monitoring frequency of the data flow between Cribl Stream and Elasticsearch to quickly identify any further discrepancies in data ingestion [12].",
+    "citations": [11, 12]
+  },
+  "resolution": {
+    "text": "To resolve the root cause of the integration issue, ensure that the Cribl Stream pipeline is correctly configured to handle timestamp conversions. Use the Auto Timestamp function to extract and format timestamps in the required UNIX_MS format before sending them to Elasticsearch [6]. On the Elasticsearch side, verify that the ingest pipeline is set up to accept the `@timestamp` field in the correct format, and adjust the date processor settings if necessary to ensure compatibility with the incoming data [24].",
+    "citations": [6, 24]
+  }
+}

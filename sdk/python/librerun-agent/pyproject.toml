@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "librerun-agent"
+version = "1.1.0b1"
+description = "The LibreRun agent SDK: serve a Run Contract v1 agent from one async handler."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+authors = [{ name = "The LibreRun contributors" }]
+# The core is stdlib-only: the ASGI app, the Run Contract, the MCP client
+# (the run-scoped capabilities and the pii redact tool), the stdout /
+# stderr capture and the thread-context plumbing need nothing installed.
+dependencies = []
+
+[project.optional-dependencies]
+# Something to serve the ASGI app with.
+uvicorn = ["uvicorn>=0.30"]
+# Trace and log export to the chassis OTLP relay, partitioned per run token.
+otel = [
+  "opentelemetry-api>=1.30",
+  "opentelemetry-sdk>=1.30",
+  "opentelemetry-exporter-otlp-proto-common>=1.30",
+]
+test = ["pytest>=8", "pytest-asyncio>=0.23", "httpx>=0.27", "uvicorn>=0.30"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+# ``-s``: the SDK replaces sys.stdout / sys.stderr with per-invocation
+# writers and the capture tests assert on that; pytest's own capture
+# would re-replace the streams between test phases and the writers
+# would never see a print().
+addopts = "-s"

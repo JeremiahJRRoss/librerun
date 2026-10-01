@@ -1,0 +1,8 @@
+{
+  "name": "Demo: a question with some context",
+  "description": "The sample the new-run page offers, and what `librerun run --agent __AGENT_ID__` and `librerun battery --agent __AGENT_ID__` submit.",
+  "user_inputs": {
+    "question": "What should the on-call engineer look at first?",
+    "context": "Checkout has returned 502 for one request in five since 09:14 UTC. A deploy at 08:50 raised the payments-vendor timeout from 2s to 30s."
+  }
+}

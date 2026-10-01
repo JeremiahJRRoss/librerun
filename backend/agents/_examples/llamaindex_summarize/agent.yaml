@@ -1,0 +1,93 @@
+# LlamaIndex container example (blueprint S5/S5-R, promise 2).
+#
+# A two-step LlamaIndex Workflow served over Run Contract v1 by the
+# LibreRun agent SDK. Lives under _examples/ — the leading underscore
+# keeps it out of production discovery. To run it: start the container
+# (agents.compose.yaml, the demo profile), set LLAMAINDEX_AGENT_URL, and
+# put this directory on LIBRERUN_AGENTS_PATH (the demo's .env already
+# does: ``agents:agents/_examples``).
+manifest_version: 1
+id: llamaindex-summarize
+name: LlamaIndex Summarize (example)
+description: >-
+  Example container agent: a two-step LlamaIndex Workflow reads a
+  document, extracts the points that matter, then writes a short brief
+  for the audience you pick. Both steps call a model through the
+  platform gateway — so the run produces costed LLM spans and an admin
+  can retarget either step without redeploying the container — and both
+  fall back to a deterministic rule when no model answers, so the
+  example still runs with no provider key anywhere.
+# The badge on the agent card (blueprint S7): a label, nothing the
+# chassis dispatches on.
+framework: llamaindex
+runtime: container
+container:
+  # Expanded from the chassis environment at discovery; registration is
+  # skipped (logged) while the variable is unset, exactly as the echo
+  # example's ECHO_AGENT_URL is.
+  url: ${LLAMAINDEX_AGENT_URL}
+input_schema: input_schema.json
+phases:
+  - name: summarize
+    # The progress rows the workflow reports, with the labels the run
+    # page shows (blueprint S7). Each id equals the LLM step of the same
+    # name below, so the page can show the model that answered it.
+    steps:
+      - id: extract
+        label: Reading the document
+      - id: summarize
+        label: Writing the brief
+output:
+  mode: structured
+
+# ``llm`` is what lets the gateway answer this agent's model calls at
+# all: without the grant every one is refused 403 llm_not_granted,
+# whatever credential the container presents, and the chassis manifest
+# loader refuses ``llm.steps`` without it outright.
+capabilities:
+  - llm
+
+# The two model calls this agent makes, one per workflow step. Every
+# value here is a DEFAULT: the tenant's admin configuration overrides
+# provider, model, temperature, max_tokens and timeout per step at
+# request time (L25, D13), which is why changing a model restarts
+# nothing. A step id the gateway does not find here is refused
+# (400 unknown_step).
+llm:
+  steps:
+    - id: extract
+      label: "The points worth keeping"
+      description: >-
+        Reads the document and returns the handful of points a reader
+        would need. The workflow's own sentence scan is the fallback
+        when no model answers.
+      provider: openai
+      model: gpt-4o-mini
+      temperature: 0.0
+      max_tokens: 500
+      timeout_seconds: 30
+    - id: summarize
+      label: "The brief, for the chosen audience"
+      description: >-
+        Turns those points into a short brief pitched at the requested
+        audience. Falls back to the points themselves, joined.
+      provider: openai
+      model: gpt-4o-mini
+      temperature: 0.2
+      max_tokens: 600
+      timeout_seconds: 30
+
+feedback_sections:
+  - id: overall
+    label: Overall
+
+scenarios: scenarios
+
+ui:
+  intake:
+    steps:
+      - title: The document
+        description: Its content is redacted before it is stored.
+        fields: [document]
+      - title: The brief you want
+        fields: [audience, focus]

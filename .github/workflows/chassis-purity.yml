@@ -1,0 +1,152 @@
+# Locked decision L13, enforced by CI from blueprint S2 on (gap A3): the
+# chassis names no agent. `backend/app`, `frontend/src`, `compose.yaml`,
+# `backend/Dockerfile`, `.env.example` and `gateway.env.example` are the
+# chassis; the bundled demo agent lives under `backend/agents/vita_v1`
+# and is named only there and in the documents that describe it. K4 added
+# `observability.env.example` and `observability-traces.env.example`.
+#
+# The pattern is token-level on purpose — `\bvita(?!l)` — so `vital`,
+# the `web-vitals` library and the frontend's `VITAL_NAMES` are excluded
+# by the lookahead, never by a line-level `--and --not -e vital` (which
+# would hide a real leak that shares a line with `web-vitals`) and never
+# by a path exclusion. Four negative steps prove the gate bites — the
+# mixed-line case, and one per path added since S2, because a path is a
+# string in an environment variable and a mistyped one passes the
+# positive check by not being looked at. A gate proven only on a clean
+# tree is indistinguishable from a broken one.
+name: chassis-purity
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  chassis-purity:
+    runs-on: ubuntu-latest
+    env:
+      # -i is load-bearing: the name is normally written capitalised.
+      PATTERN: '\bvita(?!l)'
+      # ``services/gateway`` joined the scope with S4a: it is a chassis
+      # service, built from the repository root and shipped with zero
+      # agents installed, so the rule applies to it exactly as it does
+      # to backend/app. It was outside the gate for one batch, which is
+      # how two docstring examples spelled the demo agent's id.
+      # ``gateway.env.example`` joined with K1: it is a chassis config
+      # example exactly as ``.env.example`` is, committed beside it, and
+      # the provider keys it names belong to no agent. The two
+      # observability examples joined with K4, for the same reason and
+      # with one more: they name third-party VENDORS at length, which is
+      # exactly the prose an agent name creeps into.
+      SCOPE: backend/app frontend/src services/gateway compose.yaml backend/Dockerfile .env.example gateway.env.example observability.env.example observability-traces.env.example
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: The chassis names no agent
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2086
+          if git grep -inP "$PATTERN" -- $SCOPE; then
+            echo "::error::The chassis names the demo agent (matches above). L13: chassis code, config, compose and the env example speak only LibreRun — say 'the demo agent' in prose, and keep agent-specific defaults in the agent. If a match is load-bearing (an env var, an import path, a stored value), keep a one-release alias and record it in the blueprint's deviations log."
+            exit 1
+          fi
+          echo "clean: no agent name in the chassis"
+
+      # Negative test 1 — a plain violation. `--untracked` is load-bearing
+      # here and only here: the probe is an untracked file by construction,
+      # and `git grep` ignores untracked files (exit 1, the check silently
+      # green). The positive check above needs no flag: a CI checkout has
+      # no untracked files.
+      - name: The gate bites on a plain violation
+        run: |
+          set -euo pipefail
+          probe="backend/app/_purity_probe_plain.py"
+          printf '# vita\n' > "$probe"
+          # shellcheck disable=SC2086
+          if git grep -inP --untracked "$PATTERN" -- $SCOPE; then
+            echo "the gate caught the plain violation"
+            rm -f "$probe"
+          else
+            rm -f "$probe"
+            echo "::error::The gate did not catch a plain '# vita' line — the check is broken, not the tree."
+            exit 1
+          fi
+
+      # Negative test 2 — a mixed line: the violation shares a line with
+      # the library name the lookahead excludes. A line-level exclusion of
+      # 'vital' would swallow this one; the token-level pattern must not.
+      - name: The gate bites on a mixed line beside web-vitals
+        run: |
+          set -euo pipefail
+          probe="frontend/src/_purity_probe_mixed.ts"
+          printf '// vita — see web-vitals\n' > "$probe"
+          # shellcheck disable=SC2086
+          if git grep -inP --untracked "$PATTERN" -- $SCOPE; then
+            echo "the gate caught the mixed-line violation"
+            rm -f "$probe"
+          else
+            rm -f "$probe"
+            echo "::error::The gate did not catch a violation on a line that also mentions web-vitals — the exclusion is hiding real leaks."
+            exit 1
+          fi
+
+      # Negative test 3 — the newest path in SCOPE (K1). A path is a
+      # string in an env var: mistype it and the positive check above
+      # still passes, because it passes on everything it cannot see. This
+      # probe edits the tracked file in the working tree (git grep reads
+      # the working tree) and restores it, so the path itself is proven
+      # to be inside the gate rather than merely written down.
+      - name: The gate bites inside gateway.env.example
+        run: |
+          set -euo pipefail
+          printf '# vita\n' >> gateway.env.example
+          # shellcheck disable=SC2086
+          if git grep -inP --untracked "$PATTERN" -- $SCOPE; then
+            echo "the gate caught the violation in gateway.env.example"
+            git checkout -- gateway.env.example
+          else
+            git checkout -- gateway.env.example
+            echo "::error::The gate did not catch a '# vita' line in gateway.env.example — that path is not really in SCOPE."
+            exit 1
+          fi
+
+      # Negative test 4 — the two newest paths in SCOPE (K4), each proven
+      # separately. A path is a string in an env var: the positive check
+      # above passes on everything it cannot see, so a mistyped entry is
+      # indistinguishable from a clean file until a probe edits that
+      # exact file and watches the gate bite.
+      - name: The gate bites inside the observability examples
+        run: |
+          set -euo pipefail
+          for file in observability.env.example observability-traces.env.example; do
+            printf '# vita\n' >> "$file"
+            # shellcheck disable=SC2086
+            if git grep -inP --untracked "$PATTERN" -- $SCOPE; then
+              echo "the gate caught the violation in $file"
+              git checkout -- "$file"
+            else
+              git checkout -- "$file"
+              echo "::error::The gate did not catch a '# vita' line in $file — that path is not really in SCOPE."
+              exit 1
+            fi
+          done
+
+      # And the exclusion itself is real: a line that ONLY mentions the
+      # library must stay clean, or the gate would fail every frontend
+      # change that reports web vitals.
+      - name: The exclusion admits web-vitals and VITAL_NAMES alone
+        run: |
+          set -euo pipefail
+          probe="frontend/src/_purity_probe_clean.ts"
+          printf 'import { onLCP } from "web-vitals"; // VITAL_NAMES, vital signs\n' > "$probe"
+          # shellcheck disable=SC2086
+          if git grep -inP --untracked "$PATTERN" -- $SCOPE; then
+            rm -f "$probe"
+            echo "::error::The gate flagged a line that only mentions the web-vitals library — the token-level exclusion regressed."
+            exit 1
+          fi
+          rm -f "$probe"
+          echo "web-vitals / VITAL_NAMES alone stay clean"

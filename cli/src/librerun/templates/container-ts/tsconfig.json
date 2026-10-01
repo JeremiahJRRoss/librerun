@@ -1,0 +1,16 @@
+{
+  "//": "For `npm run typecheck` and for an editor. tsx runs server.ts by stripping types, so nothing here affects the image.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM"],
+    "types": ["node"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["server.ts"]
+}

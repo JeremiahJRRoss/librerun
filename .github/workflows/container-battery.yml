@@ -1,0 +1,455 @@
+# The container battery (blueprint S4; a matrix since S5-R): build each
+# example container's image, run it the way agents.compose.yaml does —
+# the OTLP endpoint pointed at the battery's relay recorder when the
+# container exports at all, the logging driver `none` — and drive it
+# through the Run Contract from the host: schema-valid output, progress,
+# `completed`, per-invocation token binding, and the container's spans
+# arriving under the minted token with the chassis trace id.
+#
+# THREE CONTAINERS, ONE BATTERY. That is the claim the matrix exists to
+# make: the contract is the contract whatever the agent is written in.
+#   * echo_container       — the Python SDK, the smallest complete agent;
+#   * llamaindex_summarize — a LlamaIndex Workflow on the same SDK;
+#   * vercel_ai_answer_ts  — TypeScript, the Run Contract served directly
+#                            with no LibreRun package at all (L20).
+#
+# The TypeScript container ships no OTLP exporter, so its span check is
+# reported `skip` rather than `pass` — the battery refuses to call an
+# absent export a passing one — and the matrix says so per entry instead
+# of quietly asking less of one container.
+#
+# WHAT THIS JOB DOES NOT CHECK: that an agent container can reach nothing
+# but the chassis. That needs the real compose topology (the internal
+# `agents` network, Vector on the other side of it, the backend on both),
+# so it lives in `librerun-smoke.yml` — "the agent boundary holds against
+# the real container" — which dials out of all three containers with the
+# whole stack up. Asserting it here against a network this job invented
+# would be a weaker copy of a check that already exists.
+#
+# The SDK's own suite runs in a job of its own, once.
+name: container-battery
+
+on:
+  push:
+    paths:
+      - "sdk/**"
+      # The SDK suite pins its step-naming form against the GATEWAY's own
+      # parser, by reading `services/gateway/gateway/steps.py` — so a
+      # change there changes what that suite asserts. Found by the
+      # derived rule in `backend/tests/test_adapter_kit.py`, which
+      # follows composed reads as well as imports, and named these files
+      # exactly.
+      - "services/gateway/gateway/**"
+      - "backend/adapter_kit/**"
+      # Every container example this job builds and drives. One line per
+      # matrix entry: an example whose source changed without its battery
+      # running is an example nothing checked.
+      - "backend/agents/_examples/echo_container/**"
+      - "backend/agents/_examples/llamaindex_summarize/**"
+      - "backend/agents/_examples/vercel_ai_answer_ts/**"
+      # `backend/app/**`, not an enumeration. This job runs
+      # `adapter_kit.run_contract`, whose import closure is 28 files
+      # under backend/app — config, models, observability, the boundary
+      # walker. Listing pii_service and manifest by hand left
+      # `app/config.py` two hops away and outside every pattern, which
+      # is what a subset always eventually does (Codex round 6).
+      - "backend/app/**"
+      # The battery client is installed from here, so a dependency bump
+      # changes what runs without matching any other pattern. Found by
+      # censusing every workflow for the round-3 finding rather than
+      # only the file it was reported against.
+      - "backend/requirements.txt"
+      - ".github/workflows/container-battery.yml"
+      # Root-level pytest configuration, which no derived rule can
+      # reach: the dependency guard below demands coverage for files
+      # that EXIST, and the hazard here is a file's ADDITION. pytest
+      # resolves its configfile by walking UP from the invocation
+      # directory, so one added at the repo root takes effect for
+      # `cd backend && pytest` while matching no pattern above.
+      # Measured: a root pytest.ini setting `python_files` takes the
+      # backend suite from 1051 collected to 0 — and the job that
+      # would have caught it does not run, on the pull request or on
+      # the push to main. The seven filenames are pytest's own
+      # `config_names`, read out of its compiled code rather than
+      # retyped (Codex round 14). `conftest.py` is the eighth: adding
+      # a root ini moves rootdir from backend/ to the repo root, which
+      # is what makes a root conftest load at all. Measured both ways,
+      # against a conftest known to load, because the first attempt
+      # said "neither" and the positive control said the attempt was
+      # broken.
+      - "pytest.toml"
+      - ".pytest.toml"
+      - "pytest.ini"
+      - ".pytest.ini"
+      - "pyproject.toml"
+      - "tox.ini"
+      - "setup.cfg"
+      - "conftest.py"
+      # The shared "the suite RAN" assertion this job now calls. It
+      # lives outside every pattern above, so without this line a pull
+      # request weakening the one rule all these jobs rely on would skip
+      # them all and merge unexercised — the same trap round 3 found in
+      # unit-suites when the assertion was extracted from it.
+      - "scripts/assert_suite_ran.py"
+  pull_request:
+    paths:
+      - "sdk/**"
+      # The SDK suite pins its step-naming form against the GATEWAY's own
+      # parser, by reading `services/gateway/gateway/steps.py` — so a
+      # change there changes what that suite asserts. Found by the
+      # derived rule in `backend/tests/test_adapter_kit.py`, which
+      # follows composed reads as well as imports, and named these files
+      # exactly.
+      - "services/gateway/gateway/**"
+      - "backend/adapter_kit/**"
+      # Every container example this job builds and drives. One line per
+      # matrix entry: an example whose source changed without its battery
+      # running is an example nothing checked.
+      - "backend/agents/_examples/echo_container/**"
+      - "backend/agents/_examples/llamaindex_summarize/**"
+      - "backend/agents/_examples/vercel_ai_answer_ts/**"
+      # `backend/app/**`, not an enumeration. This job runs
+      # `adapter_kit.run_contract`, whose import closure is 28 files
+      # under backend/app — config, models, observability, the boundary
+      # walker. Listing pii_service and manifest by hand left
+      # `app/config.py` two hops away and outside every pattern, which
+      # is what a subset always eventually does (Codex round 6).
+      - "backend/app/**"
+      # The battery client is installed from here, so a dependency bump
+      # changes what runs without matching any other pattern. Found by
+      # censusing every workflow for the round-3 finding rather than
+      # only the file it was reported against.
+      - "backend/requirements.txt"
+      - ".github/workflows/container-battery.yml"
+      # Root-level pytest configuration — see the push half above.
+      - "pytest.toml"
+      - ".pytest.toml"
+      - "pytest.ini"
+      - ".pytest.ini"
+      - "pyproject.toml"
+      - "tox.ini"
+      - "setup.cfg"
+      - "conftest.py"
+      - "scripts/assert_suite_ran.py"
+  workflow_dispatch:
+
+# No job here needs the token for more than reading the checkout (R11,
+# scripts/check_no_publication.py: a workflow names its permissions).
+permissions:
+  contents: read
+
+jobs:
+  sdk-suite:
+    # Once, not once per container: the SDK is the same SDK for all of
+    # them, and a suite that ran three times would only take three times
+    # as long to say so.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            sdk/python/librerun-agent/pyproject.toml
+
+      - name: Install the SDK
+        run: pip install -e "sdk/python/librerun-agent[test,otel,uvicorn]"
+
+      - name: SDK unit tests
+        working-directory: sdk/python/librerun-agent
+        run: python -m pytest -q --junitxml=sdk-suite.xml
+
+      - name: The SDK suite must have RUN, not shrunk
+        working-directory: sdk/python/librerun-agent
+        # 50 -> 57: seven cases for the MCP client's transport failures
+        # (the `run.mcp` work's follow-on). Measured on a run of this
+        # tree — `57 passed
+        # in 7.13s` — not added to the old figure.
+        #
+        # 57 -> 62: K5a's five for `ctx.config.settings()`
+        # (`tests/test_config.py`), measured on a run of this tree.
+        #
+        # 62 -> 65: K8b's three for `ctx.secrets.get` and its two typed
+        # refusals (`tests/test_secrets.py`), measured on a run of this tree.
+        run: python3 ../../../scripts/assert_suite_ran.py sdk-suite.xml 65 sdk
+
+  container-battery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      # One red container must not hide the other two: a matrix that
+      # cancels its siblings turns "the TypeScript agent regressed" into
+      # "something in CI went wrong".
+      fail-fast: false
+      matrix:
+        include:
+          - name: echo
+            directory: echo_container
+            image: librerun-echo-agent
+            service_name: echo-v1
+            # Exports OTLP through the SDK, so the battery demands spans.
+            expect_spans: true
+            # NAMED, never left to the default. "The alphabetically
+            # first scenario" is load-bearing in FIVE places — this
+            # battery, `scripts/librerun_smoke.py`, `librerun run`, the
+            # smoke workflow's D7 card sweep, and the CLI's template
+            # test — so a file added to an agent's scenarios directory
+            # repoints all of them at once. The first draft of this
+            # change named the new file `demo-capabilities.json`, which
+            # sorts before `demo-echo.json`; CI found it as a D7 failure
+            # in a different workflow, because the new sample asked no
+            # model and every card's sample must produce a costed LLM
+            # span. It is `echo-capabilities.json` now, after
+            # `demo-echo.json`, and `test_agent_scenarios.py` pins that
+            # so the next such file fails a unit test rather than a job
+            # three workflows away.
+            scenario: demo-echo
+            # …and the second run: the scenario in which this agent uses
+            # the `pii` grant it declares, so the capability callback is
+            # exercised rather than assumed. The entries below leave it
+            # empty because neither example calls a chassis capability at
+            # all — `llm` is their only grant and model calls do not go
+            # over MCP.
+            mcp_scenario: echo-capabilities
+          - name: llamaindex
+            directory: llamaindex_summarize
+            image: librerun-llamaindex-agent
+            service_name: llamaindex-summarize
+            expect_spans: true
+            scenario: demo-summarize
+            mcp_scenario: ""
+          - name: vercel
+            directory: vercel_ai_answer_ts
+            image: librerun-vercel-agent
+            service_name: vercel-answer
+            # No OTLP exporter in this container: it serves the Run
+            # Contract directly and the TypeScript package that would
+            # export for it is v1.1 (L20). The battery reports the span
+            # check `skip`; it never reports an absent export as a pass.
+            expect_spans: false
+            scenario: demo-answer
+            mcp_scenario: ""
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            sdk/python/librerun-agent/pyproject.toml
+
+      # Pinned rather than left to the runner image's default, because
+      # the type-check step below runs the example's own toolchain and a
+      # runner rolling its Node forward is not a change anyone made here.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install the chassis and the SDK
+        # The battery CLIENT is Python whatever the container is written
+        # in — which is the point: one driver, three agents.
+        run: |
+          pip install -r backend/requirements.txt
+          pip install -e "sdk/python/librerun-agent[test,otel,uvicorn]"
+
+      - name: Build the image the way agents.compose.yaml builds it
+        # The repository root as the build context, exactly as the
+        # fragment declares, so what CI drives is the image the demo
+        # starts.
+        run: |
+          docker build \
+            -f backend/agents/_examples/${{ matrix.directory }}/Dockerfile \
+            -t ${{ matrix.image }} .
+
+      - name: Run the container as agents.compose.yaml would
+        # The gateway is NOT running here: this job is about the Run
+        # Contract, not about model calls, and every example falls back
+        # to its own deterministic path when no model answers. The
+        # gateway variables are still set, to an address that does not
+        # answer, because a container that behaved differently with them
+        # unset would not be the container the demo starts.
+        run: |
+          set -euo pipefail
+          otel=""
+          if [ "${{ matrix.expect_spans }}" = "true" ]; then
+            otel="-e OTEL_EXPORTER_OTLP_ENDPOINT=http://host.docker.internal:18080"
+          fi
+          docker run -d --name agent \
+            -p 8090:8090 \
+            --add-host=host.docker.internal:host-gateway \
+            $otel \
+            -e OTEL_SERVICE_NAME=${{ matrix.service_name }} \
+            -e LIBRERUN_GATEWAY_URL=http://gateway:8090 \
+            -e OPENAI_BASE_URL=http://gateway:8090/v1 \
+            -e OPENAI_API_KEY=lr_agent_battery_placeholder \
+            --log-driver none \
+            ${{ matrix.image }}
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:8090/healthz >/dev/null 2>&1; then echo "agent is up"; break; fi
+            sleep 1
+          done
+          curl -fsS http://localhost:8090/healthz
+
+      - name: Container battery
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          spans=""
+          if [ "${{ matrix.expect_spans }}" = "true" ]; then
+            spans="--relay-port 18080 --expect-spans --settle-seconds 5"
+          fi
+          # `host.docker.internal` is how the CONTAINER reaches this
+          # runner, which is not how this runner reaches the container:
+          # `--url` says the second and nothing says the first, so the
+          # battery is told. The recorder binds an ephemeral port on the
+          # host and the container reaches it through the same
+          # `--add-host` the OTLP endpoint above already relies on — no
+          # published port is involved, because the listener is the
+          # runner's, not the image's.
+          python -m adapter_kit.run_contract \
+            --url http://localhost:8090 \
+            --agent-dir agents/_examples/${{ matrix.directory }} \
+            --scenario ${{ matrix.scenario }} \
+            --mcp-advertise-host host.docker.internal \
+            $spans --json | tee ../battery.json
+
+      - name: The span check says pass or skip for the right reason
+        # A matrix entry that stopped exporting would otherwise turn its
+        # own check into a skip and go green — an absent export reported
+        # as an absent obligation. Each entry DECLARES what it expects and
+        # the verdict is held to exactly that, in both directions: a
+        # container that started exporting without its entry saying so
+        # fails here too, because then the matrix has stopped describing
+        # the tree.
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, sys
+
+          # `--json` prints the human summary first, so the report starts
+          # at the first line that is a bare `{` (the writer uses
+          # indent=2). Missing entirely means the battery printed no
+          # report at all, which is a failure and not an absence.
+          lines = open("battery.json").read().splitlines()
+          starts = [i for i, line in enumerate(lines) if line == "{"]
+          if not starts:
+              sys.exit("::error::the battery printed no JSON report")
+          result = json.loads("\n".join(lines[starts[0]:]))
+
+          verdict = result["checks"].get("spans", "<absent>")
+          expected = "pass" if os.environ["EXPECT_SPANS"] == "true" else "skip"
+          if verdict != expected:
+              sys.exit(
+                  f"::error::the span check is {verdict!r}; this matrix entry "
+                  f"declares expect_spans={os.environ['EXPECT_SPANS']}, so it "
+                  f"must be {expected!r}"
+              )
+          print(f"spans: {verdict}, as this container declares")
+
+          # THE SAME RULE FOR THE CAPABILITY CALLBACK. The battery now
+          # advertises `run.mcp.url` on every run, so `mcp` is a verdict
+          # about this scenario and not about whether the endpoint was
+          # served. No shipped demo scenario calls a chassis capability,
+          # so `skip` is what this run must report — and an example that
+          # STARTS calling without its entry saying so fails here, in the
+          # same both-directions way the span check does. The scenario
+          # that does call is the separate run below.
+          mcp = result["checks"].get("mcp", "<absent>")
+          if mcp != "skip":
+              sys.exit(
+                  f"::error::the mcp check is {mcp!r} on the {os.environ['SCENARIO']!r} "
+                  f"scenario; no shipped demo scenario calls a chassis "
+                  f"capability, so it must be 'skip'. If this example now "
+                  f"does, say so in the matrix rather than here."
+              )
+          print(f"mcp: {mcp} — {len(result['mcp'])} request(s) to run.mcp.url")
+          PY
+        env:
+          EXPECT_SPANS: ${{ matrix.expect_spans }}
+          SCENARIO: ${{ matrix.scenario }}
+
+      - name: The capability callback, where the example uses one
+        # `run.mcp.url` is part of the body the chassis sends, and an
+        # agent that uses a granted capability cannot be driven without
+        # it. One matrix entry ships a scenario in which the
+        # example really calls back; this step drives it and DEMANDS the
+        # call, so the check has somewhere it must pass rather than only
+        # places it may skip. An entry with no such scenario skips the
+        # step — and says so in the log, because a step that did not run
+        # is not a step that succeeded.
+        if: matrix.mcp_scenario != ''
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          python -m adapter_kit.run_contract \
+            --url http://localhost:8090 \
+            --agent-dir agents/_examples/${{ matrix.directory }} \
+            --scenario ${{ matrix.mcp_scenario }} \
+            --mcp-advertise-host host.docker.internal \
+            --expect-mcp --json | tee ../battery-mcp.json
+          python3 - <<'PY'
+          import json, sys
+
+          lines = open("../battery-mcp.json").read().splitlines()
+          starts = [i for i, line in enumerate(lines) if line == "{"]
+          if not starts:
+              sys.exit("::error::the battery printed no JSON report")
+          result = json.loads("\n".join(lines[starts[0]:]))
+          if result["checks"].get("mcp") != "pass":
+              sys.exit(f"::error::the mcp check is "
+                       f"{result['checks'].get('mcp', '<absent>')!r}, not 'pass'")
+          # THE CALLS, not just the verdict: a `pass` reached over zero
+          # requests would be the gate reporting success by not looking,
+          # and `--expect-mcp` is what forbids it — asserted here too so
+          # the two cannot drift apart.
+          if not result["mcp"]:
+              sys.exit("::error::the mcp check passed with no requests recorded")
+          tools = sorted({c["tool"] for c in result["mcp"] if c["tool"]})
+          print(f"mcp: pass over {len(result['mcp'])} request(s), tools: "
+                f"{', '.join(tools) or '(none)'}")
+          PY
+
+      - name: Say that the capability callback had nothing to drive
+        if: matrix.mcp_scenario == ''
+        run: |
+          echo "This example ships no scenario that calls a chassis"
+          echo "capability, so the capability callback was not exercised"
+          echo "here. That is an absence, not a pass."
+
+      - name: Type-check the example, if it ships a package.json
+        # Derived from the tree rather than from the entry's name, so the
+        # next TypeScript example is covered the day it lands. `tsx`
+        # STRIPS types without checking them, so nothing else in this job
+        # would notice a type error on a path the scenario does not take.
+        run: |
+          set -euo pipefail
+          dir="backend/agents/_examples/${{ matrix.directory }}"
+          if [ ! -f "$dir/package.json" ]; then
+            echo "no package.json in $dir — nothing to type-check"
+            exit 0
+          fi
+          node -e "process.exit(require('./$dir/package.json').scripts?.typecheck ? 0 : 1)" \
+            || { echo "::error::$dir ships a package.json with no typecheck script"; exit 1; }
+          (cd "$dir" && npm install --no-audit --no-fund && npm run typecheck)
+
+      - name: docker logs on the agent is empty by construction
+        run: |
+          set +e
+          out="$(docker logs agent 2>&1)"
+          status=$?
+          set -e
+          echo "docker logs exit=$status output=[$out]"
+          # With --log-driver none the daemon persists nothing: either an
+          # empty result or the driver's "does not support reading" refusal.
+          if [ -n "$out" ] && ! grep -qi "does not support reading" <<< "$out"; then
+            echo "docker logs returned agent output; the logging driver must be none"; exit 1
+          fi
+
+      - name: Stop the container
+        if: always()
+        run: docker rm -f agent >/dev/null 2>&1 || true

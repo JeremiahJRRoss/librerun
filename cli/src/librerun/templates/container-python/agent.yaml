@@ -1,0 +1,74 @@
+# __AGENT_NAME__ — a Python container agent on the LibreRun agent SDK.
+# Scaffolded by `librerun init __AGENT_ID__ --template container-python`.
+# Field reference: docs/authoring/Manifest.md.
+manifest_version: 1
+
+id: __AGENT_ID__
+name: __AGENT_NAME__
+description: >-
+  A container agent on the Python SDK: one async handler that answers a
+  question through the platform gateway (the `answer` step below) and
+  falls back to a deterministic reply when no model answers, so the
+  agent runs keyless too and says which of the two answered.
+
+runtime: container
+# The badge on the agent's card (S7); a label only, the chassis never
+# dispatches on it.
+framework: librerun-agent
+container:
+  # The compose service `librerun init` appended to agents.compose.yaml,
+  # on the internal `agents` network. A literal, so no chassis variable
+  # is needed; a deployment that hosts the container elsewhere edits it.
+  url: http://__SERVICE__:8090
+input_schema: input_schema.json
+
+# One phase. For a human approval gate between two phases, declare a
+# second entry with `approval: true`; the SDK hands the handler
+# `ctx.phase` and `ctx.prior_output` — docs/authoring/Container_Agents.md.
+phases:
+  - name: answer
+    deadline_seconds: 300
+    # The run page's labels for the progress rows this phase reports
+    # (`ctx.progress(..., step=STEP)` in agent.py). A row declared nowhere
+    # still shows, under its raw id.
+    steps:
+      - id: answer
+        label: Answering the question
+
+output:
+  mode: structured
+
+# The grants. `llm` is what lets the gateway answer this agent's model
+# calls at all; `pii` is the intake redaction pipeline on demand
+# (`ctx.pii.redact(...)`, the MCP `redact` tool) for anything the agent
+# fetches itself.
+capabilities: [llm, pii]
+
+# Tool secrets: a key of this agent's own for a service it calls (a
+# search API, a vector store), named here and valued per tenant on the
+# agent page's Secrets tab — never a model provider's key, which the
+# gateway alone holds. No grant is needed, and none is declared: add the
+# line below and agent.py reads it with
+# `await _tool_secret(ctx, "search_api_key")`, None until it is set.
+# secrets: [search_api_key]
+
+# The one model call this agent makes. Every value here is a DEFAULT: the
+# admin agent-configuration page edits provider, model, temperature and
+# limits per step, and the gateway resolves them at request time (L25,
+# D13) — a model change restarts nothing. A step id the manifest does
+# not declare is refused (400 unknown_step).
+llm:
+  steps:
+    - id: answer
+      label: "The answer"
+      description: Answers the question; the rule in agent.py is the fallback.
+      provider: openai
+      model: gpt-4o-mini
+      temperature: 0.2
+      max_tokens: 400
+      timeout_seconds: 30
+
+# network:
+#   egress: true   # only if the compose service also joins `egress`
+
+scenarios: scenarios

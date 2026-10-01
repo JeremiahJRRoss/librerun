@@ -1,0 +1,35 @@
+# ============================================================================
+# LibreRun — sops configuration for the encrypted-at-rest copies of the
+# dotenv files (docs/platform/Install.md, "Encrypting .env at rest"; decision L30).
+#
+# Copy to .sops.yaml — beside the encrypted copies, in the ops repository
+# that holds them, or at the root of this checkout — and put your OWN
+# recipients in. Nothing here is secret: an age recipient is a public
+# key, and a KMS entry is a key's address.
+#
+# sops reads the nearest .sops.yaml at or above the working directory and
+# applies the first creation rule whose path_regex matches the file it
+# is asked to encrypt (or, for `sops updatekeys`, the encrypted file).
+# ============================================================================
+creation_rules:
+  # Every dotenv file the deployment keeps: .env, gateway.env, and the
+  # observability pair (observability.env, observability-traces.env).
+  # The encrypted copies KEEP the .env suffix — encrypted/.env,
+  # encrypted/gateway.env — because sops tells the dotenv format from
+  # the suffix, and `sops exec-env` has no --input-type flag to say it
+  # any other way.
+  - path_regex: \.env$
+    # One age recipient per operator or host that must decrypt; several
+    # are comma-separated. `age-keygen -o ~/.config/sops/age/keys.txt`
+    # prints the public half, which is what goes here.
+    #
+    # REPLACE THIS VALUE. It is an example recipient whose private half
+    # was discarded: a file encrypted to it alone can never be decrypted
+    # by anyone.
+    age: age178azdh4694t67zdsm4jypks062n8l5g8h7m5czj5vp8643m5petqvyccg5
+    # A cloud KMS instead of, or beside, the age key — sops key groups
+    # (any one group can decrypt; `shamir_threshold` asks for several):
+    # kms: arn:aws:kms:eu-west-1:111122223333:key/00000000-0000-0000-0000-000000000000
+    # gcp_kms: projects/PROJECT/locations/global/keyRings/RING/cryptoKeys/KEY
+    # azure_keyvault: https://VAULT.vault.azure.net/keys/KEY/VERSION
+    # hc_vault_transit_uri: https://vault.example.com/v1/transit/keys/KEY

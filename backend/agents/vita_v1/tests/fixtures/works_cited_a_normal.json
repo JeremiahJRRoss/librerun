@@ -1,0 +1,26 @@
+[
+  {
+    "id": 11,
+    "url": "https://docs.cribl.io/stream/sources-elastic/",
+    "title": "Elasticsearch API Source | Cribl Docs",
+    "summary": "This document provides details on field normalization when ingesting data from Elasticsearch, including renaming `_time` to `@timestamp`.",
+    "doc_type": "kb_article",
+    "relevance_score": 0.9998591
+  },
+  {
+    "id": 12,
+    "url": "https://docs.cribl.io/stream/destinations-elastic",
+    "title": "Elasticsearch Destination | Cribl Docs",
+    "summary": "This document outlines the configuration of Cribl Stream to output data to Elasticsearch, including field renaming and precision maintenance.",
+    "doc_type": "kb_article",
+    "relevance_score": 0.99947256
+  },
+  {
+    "id": 6,
+    "url": "https://docs.cribl.io/stream/4.3/auto-timestamp-function/",
+    "title": "Auto Timestamp | Cribl Docs",
+    "summary": "This document explains how to use the Auto Timestamp function in Cribl Stream to extract and format timestamps.",
+    "doc_type": "kb_article",
+    "relevance_score": 0.8325776
+  }
+]

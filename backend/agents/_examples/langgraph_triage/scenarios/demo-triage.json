@@ -1,0 +1,10 @@
+{
+  "name": "Demo: checkout service returning 500s after a deploy",
+  "description": "The standard scenario the adapter battery runs. Deterministic input, so the example's output is stable enough to assert on.",
+  "user_inputs": {
+    "title": "Checkout is down for EU customers",
+    "service": "checkout-api",
+    "description": "Since the 14:20 deploy, checkout returns 500 for customers in the EU region. Card payments are rejected and the retry loop times out. Roughly 40% of sessions affected.",
+    "logs": "14:22:03 ERROR checkout-api upstream timeout calling payments-gw (attempt 3)\n14:22:03 ERROR checkout-api 500 POST /v1/checkout trace=8f2c1d0a\n14:22:11 WARN  checkout-api circuit breaker half-open"
+  }
+}

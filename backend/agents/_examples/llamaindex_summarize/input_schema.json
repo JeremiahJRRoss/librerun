@@ -1,0 +1,43 @@
+{
+  "type": "object",
+  "title": "Summarize a document",
+  "required": [
+    "document"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "document": {
+      "type": "string",
+      "title": "Document",
+      "description": "The text to summarize. It is redacted by the intake pipeline before the agent ever sees it, so the container works on placeholders where the original carried identity.",
+      "minLength": 1,
+      "maxLength": 20000,
+      "x-ui-widget": "textarea",
+      "x-pii": true
+    },
+    "audience": {
+      "type": "string",
+      "title": "Who is reading",
+      "description": "Pitches the brief. The agent names a step, never a model — which model answers is the admin's configuration for that step.",
+      "enum": [
+        "an on-call engineer",
+        "a support lead",
+        "an executive"
+      ],
+      "default": "a support lead"
+    },
+    "focus": {
+      "type": "string",
+      "title": "Focus on (optional)",
+      "description": "A subject to keep in view while extracting, e.g. \"the customer impact\".",
+      "maxLength": 200
+    },
+    "max_points": {
+      "type": "integer",
+      "title": "How many points to keep",
+      "minimum": 1,
+      "maximum": 10,
+      "default": 5
+    }
+  }
+}

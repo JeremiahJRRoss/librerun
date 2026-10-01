@@ -1,0 +1,114 @@
+# ============================================================================
+# LibreRun — Vector Datadog overlay (blueprint S7a, decision L26)
+#
+# Merged on top of vector.yaml + vector-otlp-shape.yaml when
+# LIBRERUN_OBS_VENDOR=datadog:
+#
+#   1. LIBRERUN_OBS_VENDOR=datadog in .env  (the SELECTOR lives in .env,
+#      because compose expands it while building Vector's command line —
+#      an env_file is read by the container, too late for that)
+#   2. the DATADOG_* / DD_* values in observability.env
+#   3. ./compose.sh --profile obs up -d
+#      (the `obs` profile starts otel-bridge, which the trace leg needs;
+#       env changes RECREATE containers — a bare `restart` keeps the old
+#       env)
+#
+# Two legs, both planes on each, every hop off the box dialling OUT:
+#
+#   logs   (backend JSONL + OTel log records) --> Datadog logs intake
+#          the native `datadog_logs` sink, which POSTs the documented
+#          JSON array to <endpoint>/api/v2/logs with the API key header.
+#          DATADOG_API_KEY        the API key the sink authenticates with
+#          DATADOG_LOGS_ENDPOINT  scheme + host, NO path (the sink
+#                                 appends /api/v2/logs itself), e.g.
+#                                 https://http-intake.logs.datadoghq.com
+#                                 — this is where a non-default Datadog
+#                                 SITE is expressed, since `endpoint`
+#                                 overrides the sink's `site`/DD_SITE
+#                                 (EU: https://http-intake.logs.datadoghq.eu)
+#
+#   traces (every span) --> otel-bridge --> a Datadog Agent's OTLP receiver
+#          The sink below posts the wire-shaped OTLP/JSON to the
+#          in-network bridge (config/otel-bridge-datadog.yaml), which
+#          re-exports OTLP PROTOBUF over HTTP. Datadog's own trace
+#          intake is not an OTLP endpoint: the documented OTLP path is
+#          the Agent's receiver, which holds DD_API_KEY and DD_SITE
+#          itself and needs no auth header from us.
+#          DD_AGENT_OTLP_URL   the Agent's OTLP/HTTP traces URL, full
+#                              path, e.g. http://datadog-agent:4318/v1/traces
+#          DD_API_KEY / DD_SITE are the AGENT's variables, set where the
+#          Agent runs; the bridge never sees them.
+#
+# Vector's `datadog_traces` sink is deliberately NOT used: it speaks
+# Datadog's own APM protocol, so the span would arrive translated
+# rather than as the OTLP the rest of this batch proves. The bridge
+# keeps one wire shape across all three vendors.
+#
+# This overlay FORWARDS; it never redacts. Both planes reach Vector
+# already walked — S4's walkers and the authenticated relay are the only
+# way telemetry enters the box — so redacting again here would only be a
+# second, weaker copy of the one walker.
+#
+# Before forwarding run-plane traces off-box, consider
+# OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=NO_CONTENT in .env:
+# by default those spans carry LLM prompt/completion content.
+# ============================================================================
+
+transforms:
+  # The vendor's reserved service field, lifted from the OTLP resource
+  # where there is one. `otlp.logs` events — container agents through
+  # S4's authenticated relay, the browser ux plane through the RUM relay
+  # — carry their resource under `.resources`; the backend's own JSONL
+  # lines, tailed from ./data/logs, carry none, because the file IS the
+  # backend's and its resource identity is the backend's service name.
+  #
+  # Nothing is removed and `.resources` is not invented: an event that
+  # arrived with one keeps it exactly as Vector holds it, so the
+  # identity a vendor reads is the emitter's own. (The contract test in
+  # .github/workflows/obs-vendors.yml decodes the intake payload and
+  # requires that resource back, which is what makes dropping it fail.)
+  datadog_logs_shape:
+    type: remap
+    inputs:
+      - otlp.logs
+      - backend_logs
+    source: |
+      svc = to_string(.resources."service.name") ?? ""
+      if svc == "" {
+        svc = "${LIBRERUN_OBS_SERVICE_NAME:-librerun-backend}"
+      }
+      .service = svc
+      .ddsource = "librerun"
+
+sinks:
+  datadog_logs:
+    type: datadog_logs
+    inputs:
+      - datadog_logs_shape
+    default_api_key: "${DATADOG_API_KEY:-}"
+    # Scheme + host, no path. Empty is deliberate: an overlay selected
+    # with nothing configured must fail loudly at start-up rather than
+    # quietly drop the stream. Check: ./compose.sh logs -f vector
+    endpoint: "${DATADOG_LOGS_ENDPOINT:-}"
+
+  datadog_traces:
+    type: http
+    inputs:
+      - obs_otlp_shape
+    # The in-network bridge (compose `obs` profile) — NOT Datadog. It
+    # converts OTLP/JSON to the protobuf the Agent's OTLP receiver
+    # requires and owns the Agent's endpoint (config/otel-bridge-datadog.yaml).
+    uri: "http://otel-bridge:4318/v1/traces"
+    method: post
+    encoding:
+      codec: json
+    # One OTLP envelope per request: OTLP receivers take a single JSON
+    # document, so batching into an array would be rejected. Fine at
+    # demo/dev volumes; revisit for heavy production span rates.
+    batch:
+      max_events: 1
+    framing:
+      method: newline_delimited
+    request:
+      headers:
+        Content-Type: application/json

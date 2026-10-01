@@ -1,0 +1,168 @@
+# The release (blueprint S9, gaps I1 and I2; release checklist §3.3) —
+# source only since A2 (L37, D26; R11).
+#
+# A tag is the whole trigger: push `v1.1.0-beta.1` and this runs. Nothing
+# here can be started by hand, and nothing publishes off a branch — what
+# ships is a commit somebody tagged, with the CI that commit already
+# passed still attached to it.
+#
+#   release-gate     the tag agrees with VERSION; the publishability
+#                    checks pass, the no-publication guard among them;
+#                    every OTHER check run on this exact commit finished
+#                    green (it waits for the ones still running). That is
+#                    "full CI" without running an hour of it twice: the
+#                    same checks, on the same sha.
+#   release-notes    the GitHub Release: notes from CHANGELOG.md, marked
+#                    pre-release for any tag with a `-` in it, and no
+#                    file attached. The source archives GitHub makes for
+#                    every release are all a release carries (L37): no
+#                    image, wheel or package is built for it or pushed
+#                    anywhere, and scripts/check_no_publication.py fails
+#                    CI on any workflow that could (R11). Whoever runs
+#                    LibreRun builds it from the tag.
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  # ====================================================================
+  release-gate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: The tag and VERSION say the same thing
+        id: version
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          version="${tag#v}"
+          file="$(cat VERSION)"
+          if [ "$version" != "$file" ]; then
+            echo "::error::The tag is $tag and VERSION says $file. One of them is wrong, and publishing either would put a number on an artifact that nothing else in the tree agrees with. Fix VERSION on a branch, merge it, and tag the merge — do not move the tag."
+            exit 1
+          fi
+          # A pre-release is any version with a hyphen in it: 1.0.0-rc1,
+          # 1.0.0-beta.2. Semver already decided this and there is no
+          # reason to decide it again.
+          case "$version" in
+            *-*) prerelease=true ;;
+            *)   prerelease=false ;;
+          esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          echo "### Releasing \`$version\` (pre-release: $prerelease)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: The publishability checks
+        run: |
+          set -euo pipefail
+          bash .github/publish_purity.sh
+          python3 scripts/check_single_version.py
+          python3 scripts/check_no_publication.py
+
+      - name: Every other check on this commit is green
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # This workflow's own jobs are check runs on this same commit,
+          # and one of them is this step. Excluding them by NAME would
+          # break the first time a job is renamed; every job of one
+          # workflow run shares a check suite, so exclude that id and
+          # nothing else.
+          suite=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+                    --jq '.check_suite_id')
+          echo "this run's check suite: $suite"
+          deadline=$(( $(date +%s) + 1800 ))
+          while : ; do
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::error::Checks on this commit were still running, or the checks API was still not answering, after 30 minutes. Re-run this workflow once they finish; nothing has been published."
+              exit 1
+            fi
+            # A transient 5xx from the checks API is not a red check, and
+            # failing the release on one would be a release that depends
+            # on the weather. Retry until the deadline instead; only an
+            # answer counts.
+            if ! runs=$(gh api --paginate \
+                          "repos/${GITHUB_REPOSITORY}/commits/${SHA}/check-runs?per_page=100" \
+                          --jq ".check_runs[] | select(.check_suite.id != ${suite}) |
+                                [.name, .status, (.conclusion // \"pending\")] | @tsv"); then
+              echo "::warning::the checks API did not answer; retrying"
+              sleep 30
+              continue
+            fi
+            if [ -z "$runs" ]; then
+              echo "::error::No CI has run on ${SHA} at all. A tag is not a way around review: push the commit through a pull request, let the checks run on it, and tag the merge."
+              exit 1
+            fi
+            # Every conclusion that is not a pass. `skipped` and
+            # `neutral` are passes (a path filter that did not match, an
+            # informational check); `action_required` and `stale` are
+            # not, whatever they look like in the UI.
+            bad=$(printf '%s\n' "$runs" | awk -F'\t' '
+              $3 == "failure" || $3 == "cancelled" || $3 == "timed_out" ||
+              $3 == "action_required" || $3 == "stale"')
+            if [ -n "$bad" ]; then
+              printf '%s\n' "$bad"
+              echo "::error::A check on this commit did not pass (above). The release publishes what CI proved, or it publishes nothing."
+              exit 1
+            fi
+            waiting=$(printf '%s\n' "$runs" | awk -F'\t' '$2 != "completed"')
+            if [ -z "$waiting" ]; then
+              printf '%s\n' "$runs" | awk -F'\t' '{printf "  %-44s %s\n", $1, $3}'
+              echo "every check on this commit is green"
+              break
+            fi
+            echo "waiting for $(printf '%s\n' "$waiting" | wc -l) check(s) still running …"
+            sleep 30
+          done
+
+  # ====================================================================
+  release-notes:
+    needs: [release-gate]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The notes come from CHANGELOG.md at the tag, and the script
+          # reads the file — not the history — so depth 1 is enough.
+          fetch-depth: 1
+
+      - name: Write the notes
+        run: python3 scripts/release_notes.py "${GITHUB_REF_NAME}" > "$RUNNER_TEMP/notes.md"
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.release-gate.outputs.version }}
+          PRERELEASE: ${{ needs.release-gate.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          # `create` fails if the release exists — deliberately. A second
+          # run of this workflow on the same tag means something went
+          # wrong the first time, and silently replacing published notes
+          # is how a release quietly changes under the people who read
+          # it. No file argument: the release carries GitHub's source
+          # archives and nothing else (L37). --verify-tag refuses a tag
+          # the remote does not have, so the release cannot mint one.
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "LibreRun ${VERSION}" \
+            --notes-file "$RUNNER_TEMP/notes.md" \
+            --prerelease="${PRERELEASE}" \
+            --verify-tag
+          echo "released ${GITHUB_REF_NAME}: its notes, and the source archives GitHub makes" >> "$GITHUB_STEP_SUMMARY"

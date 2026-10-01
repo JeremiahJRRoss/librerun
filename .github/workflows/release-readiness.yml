@@ -1,0 +1,536 @@
+# The eight checks that stand between this tree and a publishable release
+# (blueprint S9; release checklist §3.3 items 1 and 5; R11 since A2; R18's
+# probes since B1a; R14 and R16's scan since A3):
+#
+#   dco             every commit in a pull request is signed off (L17: a
+#                   DCO, not a CLA)
+#   spdx            every file's licence is what the licence scope map
+#                   (REUSE.toml) says; LICENSE, NOTICE and THIRD_PARTY.md
+#                   are what they must be; reuse lint
+#   single-version  VERSION is the only place the release's number is
+#                   decided
+#   publish-purity  no tracked file, path or symlink target names this
+#                   repository or its owner, in any spelling, so the public
+#                   repository can be built from this tree without carrying
+#                   the development one's identity (gap I6; L21, L39)
+#   no-publication  no workflow can publish anything — no permission that
+#                   could publish or sign, no registry login, push, package
+#                   publish, release asset or secret — because a release is
+#                   source only (L37, D26; R11)
+#   public-commit   the public repository's commits are made as the tree
+#                   says: the first, parentless, and each fast-forward after
+#                   it, their proofs, the revert guard, and the owner written
+#                   in by one script, with each refusal planted in a
+#                   throwaway clone (R18)
+#   dependency-identity
+#                   every image the tree builds from, runs or tests on is
+#                   pinned by tag and digest, and the distribution surface
+#                   matrix accounts for it and for every lock (R14; D25,
+#                   D27); Valkey refuses a volume Redis 7.4 wrote and boots
+#                   on a fresh one (C-18)
+#   tree-review     the tree a public repository would carry holds no
+#                   secret, gitlink, LFS pointer, file with a NUL byte,
+#                   build output, archive or stray licence file (R16's
+#                   scan), gitleaks pinned by the SHA-256 its release lists
+#
+# Every job here negative-tests itself: it injects the exact violation it
+# exists to catch and fails if the check stays green. On a clean tree a
+# broken checker and a working one look identical, and these eight run on
+# a clean tree nearly every time.
+name: release-readiness
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  # --------------------------------------------------------------------
+  # Developer Certificate of Origin 1.1
+  # --------------------------------------------------------------------
+  dco:
+    # Only a pull request has a range of commits to check. A push to main
+    # is the merge of a pull request that already passed this.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The whole history: the check walks base..head, and a shallow
+          # clone has no base to walk from.
+          fetch-depth: 0
+
+      - name: Every commit is signed off
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          # The base BRANCH as it stands now, not the base SHA the event
+          # carried. When a pull request merges its base in — which every
+          # batch here does while parallel sessions land on main — the
+          # base's own commits become reachable from head, and a range
+          # anchored to a sha that has since moved would demand a
+          # sign-off from whoever wrote them: someone who is not this
+          # pull request's author and cannot fix it. Excluding the branch
+          # as it stands asks each author for exactly their own commits.
+          # Explicit refspec, not `git fetch origin main`: a pull_request
+          # checkout configures a refspec for the PR's merge ref, and a
+          # bare branch name would land in FETCH_HEAD without creating
+          # the remote-tracking ref the check needs.
+          git fetch --quiet origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          git rev-parse --verify --quiet "refs/remotes/origin/${BASE_REF}" >/dev/null || {
+            echo "::error::Could not resolve the base branch origin/${BASE_REF}. Without it the check cannot tell this pull request's commits from the ones already on the base, and it will not guess."
+            exit 1
+          }
+          bash .github/dco_check.sh "origin/$BASE_REF" "$HEAD"
+
+      # Negative test — an unsigned commit must fail. Built on a detached
+      # temporary history so the branch under test is untouched; no branch
+      # is created (the session guard forbids one) and nothing is pushed.
+      - name: The check rejects an unsigned commit
+        run: |
+          set -euo pipefail
+          git config user.email "probe@librerun.invalid"
+          git config user.name "DCO Probe"
+          base=$(git rev-parse HEAD)
+          git commit --allow-empty --no-verify -m "probe: no sign-off here" --quiet
+          probe=$(git rev-parse HEAD)
+          if bash .github/dco_check.sh "$base" "$probe"; then
+            git reset --hard --quiet "$base"
+            echo "::error::The DCO check passed a commit with no Signed-off-by line. The check is broken, not the branch."
+            exit 1
+          fi
+          echo "the check caught the unsigned commit"
+          git reset --hard --quiet "$base"
+
+      # …and it must accept a signed one, or it would fail every pull
+      # request and teach everyone to ignore it.
+      - name: The check accepts a signed-off commit
+        run: |
+          set -euo pipefail
+          base=$(git rev-parse HEAD)
+          git commit --allow-empty --no-verify --quiet \
+            -m "probe: signed off" -m "Signed-off-by: DCO Probe <probe@librerun.invalid>"
+          probe=$(git rev-parse HEAD)
+          if bash .github/dco_check.sh "$base" "$probe"; then
+            echo "the check accepts a correctly signed-off commit"
+            git reset --hard --quiet "$base"
+          else
+            git reset --hard --quiet "$base"
+            echo "::error::The DCO check rejected a commit that IS signed off — it would fail every pull request."
+            exit 1
+          fi
+
+      # The regression this step exists for. `grep -q` exits at the
+      # first match, the writer upstream takes SIGPIPE, and `set -o
+      # pipefail` turns that into a failed pipeline — so a sign-off that
+      # IS there reads as missing. It is a race with the message's
+      # length, which is why it passed on every short commit and failed
+      # in CI on the longest one. A probe short enough to win that race
+      # would prove nothing, so this one cannot win it.
+      - name: The check accepts a signed-off commit with a very long message
+        run: |
+          set -euo pipefail
+          base=$(git rev-parse HEAD)
+          # Piped into `-F -`, not passed as `-m "$long"`: Linux caps a
+          # single argument at 128 KiB (MAX_ARG_STRLEN), and the probe
+          # must be bigger than a 64 KiB pipe buffer to lose the race on
+          # purpose. On the command line it dies with "Argument list too
+          # long" before it can test anything.
+          {
+            echo "probe: a message longer than a pipe buffer"
+            echo
+            head -c 200000 /dev/zero | tr '\0' 'x'
+            echo
+            echo
+            echo "Signed-off-by: DCO Probe <probe@librerun.invalid>"
+          } | git commit --allow-empty --no-verify --quiet -F -
+          probe=$(git rev-parse HEAD)
+          if bash .github/dco_check.sh "$base" "$probe"; then
+            echo "the check reads a sign-off under a long message"
+            git reset --hard --quiet "$base"
+          else
+            git reset --hard --quiet "$base"
+            echo "::error::The check reported a signed-off commit as unsigned because its message is long. That is the SIGPIPE race: grep -q exits early, the writer dies of SIGPIPE, and pipefail calls the pipeline a failure. Read the body into a variable and match it with a here-string."
+            exit 1
+          fi
+
+      # A sign-off naming someone else is not a sign-off: the DCO is a
+      # statement by the author about their own right to contribute.
+      - name: The check rejects a sign-off that is not the author's
+        run: |
+          set -euo pipefail
+          base=$(git rev-parse HEAD)
+          git commit --allow-empty --no-verify --quiet \
+            -m "probe: somebody else's sign-off" \
+            -m "Signed-off-by: Someone Else <else@librerun.invalid>"
+          probe=$(git rev-parse HEAD)
+          if bash .github/dco_check.sh "$base" "$probe"; then
+            git reset --hard --quiet "$base"
+            echo "::error::The DCO check accepted a Signed-off-by that does not match the commit author. Anyone could sign for anyone."
+            exit 1
+          fi
+          echo "the check caught the mismatched sign-off"
+          git reset --hard --quiet "$base"
+
+  # --------------------------------------------------------------------
+  # Licensing: the scope map, the notices, the third-party inventory
+  # --------------------------------------------------------------------
+  spdx:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install reuse
+        run: pip install "reuse==6.2.0"
+
+      # Six rules, every expectation derived from REUSE.toml
+      # (docs/release/License_Scope_Map.md has what each one holds): the
+      # script headers, the manifests and image labels, LICENSE and
+      # NOTICE, stale licence statements, what a source archive carries,
+      # and the third-party inventory.
+      - name: Every file's licence is what the licence scope map says
+        run: python3 scripts/check_licensing.py
+
+      - name: The map itself is REUSE-compliant
+        run: reuse lint
+
+      # Negative tests: each rule, and reuse lint, is shown failing on the
+      # violation it exists to catch; a probe that stays green fails here.
+      - name: Every licensing rule bites
+        run: bash scripts/licensing_probes.sh licensing
+
+      - name: reuse lint bites
+        run: bash scripts/licensing_probes.sh reuse
+
+  # --------------------------------------------------------------------
+  # One VERSION
+  # --------------------------------------------------------------------
+  single-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: VERSION is the only place the number is decided
+        run: python3 scripts/check_single_version.py
+
+      # Negative test 1 — drift. One artifact disagrees with VERSION.
+      - name: The check bites when an artifact drifts
+        run: |
+          set -euo pipefail
+          cp backend/app/version.py /tmp/version.keep
+          sed -i 's/^__version__ = .*/__version__ = "9.9.9-probe"/' backend/app/version.py
+          if python3 scripts/check_single_version.py; then
+            cp /tmp/version.keep backend/app/version.py
+            echo "::error::The single-version check passed an artifact that disagrees with VERSION. It is reading something other than the file it prints."
+            exit 1
+          fi
+          cp /tmp/version.keep backend/app/version.py
+          echo "the check caught the drifting artifact"
+
+      # Negative test 2 — a new package nobody decided about. The rule
+      # that makes this check survive the next six months.
+      - name: The check bites on a package that is neither pinned nor exempt
+        run: |
+          set -euo pipefail
+          mkdir -p .probe_pkg
+          printf '[project]\nname = "probe"\nversion = "0.0.1"\n' > .probe_pkg/pyproject.toml
+          git add -N .probe_pkg/pyproject.toml
+          if python3 scripts/check_single_version.py; then
+            git rm -q --cached --force .probe_pkg/pyproject.toml >/dev/null 2>&1 || true
+            rm -rf .probe_pkg
+            echo "::error::A new pyproject.toml passed without being pinned to VERSION or exempted by name. The next package added to this tree would ship with whatever version it happened to carry."
+            exit 1
+          fi
+          git rm -q --cached --force .probe_pkg/pyproject.toml >/dev/null 2>&1 || true
+          rm -rf .probe_pkg
+          echo "the check caught the undecided package"
+
+      # D38's four. Each starts from a state the converter A2 left passes,
+      # so each tells the two converters apart: every carrier moves at
+      # once, because one carrier set apart from the rest is red under
+      # either converter and proves nothing. The carriers are spelled out
+      # here rather than read from the check, so one added to its PINNED
+      # list and not here turns the beta's step red. Each step restores
+      # the checkout. The version they write is one no release carries,
+      # 9.9.9: written at the tree's own number, an edit moves fewer than
+      # ten files, and `moved` would fail once VERSION is the beta's.
+      - name: The carriers, for the four steps below
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/carriers.sh" <<'SH'
+          # carriers SEMVER PEP440 — VERSION, package.json, its lock's two
+          # root lines and the two services' constants take the semver
+          # spelling; the three Python distributions and their packages'
+          # __version__ take the PEP 440 one. Ten files, or it fails.
+          carriers() {
+            printf '%s\n' "$1" > VERSION
+            sed -i -E "s/^version = \"[^\"]*\"\$/version = \"$2\"/" \
+              cli/pyproject.toml sdk/python/librerun-agent/pyproject.toml \
+              backend/adapters/pyproject.toml
+            sed -i -E "s/^__version__ = \"[^\"]*\"\$/__version__ = \"$2\"/" \
+              cli/src/librerun/__init__.py \
+              sdk/python/librerun-agent/src/librerun_agent/__init__.py
+            sed -i -E "s/^__version__ = \"[^\"]*\"\$/__version__ = \"$1\"/" \
+              backend/app/version.py services/gateway/gateway/version.py
+            sed -i -E "s/^  \"version\": \"[^\"]*\",\$/  \"version\": \"$1\",/" \
+              frontend/package.json
+            lock_root "$1"
+            lock_package "$1"
+            moved 10
+          }
+          # The lock's two root lines alone — every locked package has a
+          # "version" line of its own. The root's is the file's first
+          # "version" line; the root package's the first after `"": {`.
+          lock_root() {
+            sed -i -E "0,/^  \"version\": /s/^  \"version\": \"[^\"]*\",\$/  \"version\": \"$1\",/" \
+              frontend/package-lock.json
+          }
+          lock_package() {
+            sed -i -E "/^    \"\": \{\$/,/^      \"version\": /s/^      \"version\": \"[^\"]*\",\$/      \"version\": \"$1\",/" \
+              frontend/package-lock.json
+          }
+          # moved N — the edit reached N files, so a probe cannot pass on
+          # an edit that silently matched nothing.
+          moved() {
+            local n
+            n=$(git diff --name-only | wc -l)
+            if [ "$n" -ne "$1" ]; then
+              git diff --stat
+              echo "::error::the probe's edit moved $n file(s), not $1: a carrier's line no longer reads as this step expects"
+              restore
+              exit 1
+            fi
+          }
+          restore() { git checkout -q -- .; }
+          SH
+
+      - name: The beta's spellings pass
+        run: |
+          set -euo pipefail
+          . "$RUNNER_TEMP/carriers.sh"
+          carriers 9.9.9-beta.1 9.9.9b1
+          if ! python3 scripts/check_single_version.py; then
+            restore
+            echo "::error::Every carrier at a beta's spellings — 9.9.9-beta.1, and 9.9.9b1 in the Python distributions — was refused. That is how D38 writes a beta, 1.1.0-beta.1 among them: the converter no longer writes PEP 440's canonical form."
+            exit 1
+          fi
+          restore
+          echo "the beta's spellings pass"
+
+      - name: The check bites on 9.9.9beta.1, the spelling pip rewrites
+        run: |
+          set -euo pipefail
+          . "$RUNNER_TEMP/carriers.sh"
+          carriers 9.9.9-beta.1 9.9.9beta.1
+          if python3 scripts/check_single_version.py; then
+            restore
+            echo "::error::Every Python distribution at 9.9.9beta.1 passed. That is valid PEP 440 which pip prints as 9.9.9b1, so pip show and the tree would disagree: the converter is dropping the hyphen and nothing else."
+            exit 1
+          fi
+          restore
+          echo "the check refused 9.9.9beta.1"
+
+      - name: The check bites on a label outside the scheme
+        run: |
+          set -euo pipefail
+          . "$RUNNER_TEMP/carriers.sh"
+          carriers 9.9.9-preview.1 9.9.9-preview.1
+          if python3 scripts/check_single_version.py; then
+            restore
+            echo "::error::Every carrier at 9.9.9-preview.1 passed. pip reads -preview.1 as rc1, so the distributions would carry one version and pip show print another; a label outside alpha, beta and rc must stop the check."
+            exit 1
+          fi
+          restore
+          echo "the check refused -preview.1"
+
+      - name: The check bites on a stale lock
+        run: |
+          set -euo pipefail
+          . "$RUNNER_TEMP/carriers.sh"
+          # Each root line alone: both are read, so either going stale is
+          # caught. They said 0.1.0 for a whole release once, while
+          # package.json said the release's number.
+          for line in lock_root lock_package; do
+            "$line" 0.1.0
+            moved 1
+            if python3 scripts/check_single_version.py; then
+              restore
+              echo "::error::frontend/package-lock.json's $line line said 0.1.0 and the check passed: the lock is not pinned to VERSION."
+              exit 1
+            fi
+            restore
+            echo "the check caught the stale lock ($line)"
+          done
+
+  # --------------------------------------------------------------------
+  # publish-purity
+  # --------------------------------------------------------------------
+  publish-purity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: No tracked file names this repository or its owner
+        run: bash .github/publish_purity.sh
+
+      # Negative tests. The check keeps digests, not names, so the probes
+      # spell nothing either: a canary in contents, a path, a symlink
+      # target and run together with other words; and, only in this
+      # repository, the real names derived from $GITHUB_REPOSITORY at run
+      # time — its URL, an image path, prose, an e-mail domain, a handle.
+      - name: The gate bites
+        run: bash scripts/licensing_probes.sh purity
+
+  # --------------------------------------------------------------------
+  # no-publication (R11)
+  # --------------------------------------------------------------------
+  no-publication:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: No workflow can publish anything
+        run: python3 scripts/check_no_publication.py
+
+      # Negative tests. Each capability the guard refuses is planted in a
+      # workflow that is never committed — a committed one would run — and
+      # the guard must name its file and line; pages: write in
+      # docs-site.yml (D21) and a release with no file must pass.
+      - name: The gate bites
+        run: bash scripts/publication_probes.sh
+
+  # --------------------------------------------------------------------
+  # public-commit (R18's probes)
+  # --------------------------------------------------------------------
+  public-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # scripts/prepare_public_repo.sh and scripts/resolve_public_owner.sh,
+      # run in a throwaway clone of this checkout: the green controls
+      # prepare a first commit and a fast-forward and publish both to a
+      # bare repository beside it, and every refusal is planted and must
+      # go red for its own reason. git is allowed the file protocol alone,
+      # so nothing reaches a network, and nothing is uploaded. The revert
+      # guard needs git 2.40 or later, whose version the log records.
+      - name: The public commit's machinery bites
+        run: |
+          git version
+          bash scripts/public_commit_probes.sh
+
+      # A local run's case: a checkout with no origin remote and no event
+      # to read, where the probes once stopped before their first probe
+      # (a failed remote lookup under pipefail). A clone of this checkout
+      # with its remote removed is taken for no development repository,
+      # and every probe still runs.
+      - name: The probes run where no remote and no event name the repository
+        run: |
+          set -euo pipefail
+          clone="$RUNNER_TEMP/no-remote"
+          git clone -q --no-hardlinks --no-checkout "$GITHUB_WORKSPACE" "$clone"
+          git -C "$clone" fetch -q "$GITHUB_WORKSPACE" HEAD
+          git -C "$clone" checkout -q --detach FETCH_HEAD
+          git -C "$clone" remote remove origin
+          cd "$clone"
+          env -u GITHUB_REPOSITORY -u GITHUB_EVENT_PATH bash scripts/public_commit_probes.sh
+
+  # --------------------------------------------------------------------
+  # dependency-identity (R14)
+  # --------------------------------------------------------------------
+  dependency-identity:
+    runs-on: ubuntu-latest
+    env:
+      # The two images the volume proof runs (C-18), each pinned like
+      # every image in the tree: the Valkey compose runs, and the Redis the
+      # stack ran before A3. The first step holds VALKEY_IMAGE to
+      # compose's, so a refresh moves them together.
+      VALKEY_IMAGE: docker.io/valkey/valkey:8-alpine@sha256:081c2f5cb575efc901aa80ff9cdbd1ec6a301682fd35e1ebb4b0990a4a4a8507
+      REDIS7_IMAGE: docker.io/library/redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Every image is pinned by tag and digest, and the matrix accounts for each
+        run: python3 scripts/check_dependency_identity.py
+
+      # Each rule's violation, planted and seen red for its own reason,
+      # and the tree put back as it was (the script compares git status).
+      - name: The guard bites
+        run: bash scripts/dependency_identity_probes.sh
+
+      - name: The proof runs compose's own Valkey
+        run: |
+          set -euo pipefail
+          compose="$(grep -A2 -E '^  redis:$' compose.yaml | sed -n -E 's/^ +image: *//p')"
+          if [ "$compose" != "$VALKEY_IMAGE" ]; then
+            echo "::error::compose runs $compose, and this job would prove $VALKEY_IMAGE"; exit 1
+          fi
+          echo "compose's redis service runs $compose"
+
+      # Why the upgrade note says to remove the volume (Install.md §10): a
+      # Redis 7.4 snapshot is RDB format 12, and Valkey 8 reads no higher
+      # than 11. Both runs use volumes this job creates and removes; no
+      # volume that holds data is ever touched (C-18).
+      - name: Valkey refuses a volume Redis 7.4 wrote, and boots on a fresh one
+        run: |
+          set -euo pipefail
+          old="librerun-rdb-proof-$GITHUB_RUN_ID"
+          fresh="$old-fresh"
+          trap 'docker rm -f rdb-redis rdb-valkey rdb-fresh >/dev/null 2>&1 || true; docker volume rm -f "$old" "$fresh" >/dev/null 2>&1 || true' EXIT
+          docker volume create "$old" >/dev/null
+          docker run -d --name rdb-redis -v "$old:/data" "$REDIS7_IMAGE" >/dev/null
+          for _ in $(seq 1 30); do
+            [ "$(docker exec rdb-redis redis-cli ping 2>/dev/null)" = PONG ] && break
+            sleep 1
+          done
+          docker exec rdb-redis redis-cli SET librerun:rdb-proof written-by-redis-7 >/dev/null
+          docker exec rdb-redis redis-cli SAVE
+          docker stop rdb-redis >/dev/null
+          set +e
+          timeout 60 docker run --name rdb-valkey -v "$old:/data" "$VALKEY_IMAGE" > valkey-on-redis.log 2>&1
+          status=$?
+          set -e
+          cat valkey-on-redis.log
+          if [ "$status" = 0 ] || [ "$status" = 124 ]; then
+            echo "::error::Valkey did not refuse the volume Redis 7.4 wrote (exit $status)"; exit 1
+          fi
+          grep -F "Can't handle RDB format version 12" valkey-on-redis.log \
+            || { echo "::error::Valkey stopped, but not for the snapshot's format"; exit 1; }
+          docker volume create "$fresh" >/dev/null
+          docker run -d --name rdb-fresh -v "$fresh:/data" "$VALKEY_IMAGE" >/dev/null
+          for _ in $(seq 1 30); do
+            [ "$(docker exec rdb-fresh valkey-cli ping 2>/dev/null)" = PONG ] && { echo "Valkey boots on a fresh volume and answers PONG"; exit 0; }
+            sleep 1
+          done
+          docker logs rdb-fresh
+          echo "::error::Valkey did not answer PING on a fresh volume"; exit 1
+
+  # --------------------------------------------------------------------
+  # tree-review (R16's scan half)
+  # --------------------------------------------------------------------
+  tree-review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The release tarball, refused unless its SHA-256 is the one the
+      # script pins; the scan then runs that binary and no other version.
+      - name: The pinned gitleaks
+        run: bash scripts/review_public_tree.sh --install "$RUNNER_TEMP/gitleaks"
+
+      # `git archive HEAD`, extracted: the tree prepare_public_repo.sh
+      # re-parents unchanged. Rule, file and line only; never a value.
+      - name: The tree a public repository would carry
+        run: GITLEAKS="$RUNNER_TEMP/gitleaks/gitleaks" bash scripts/review_public_tree.sh
+
+      - name: The review bites, and prints no token
+        run: GITLEAKS="$RUNNER_TEMP/gitleaks/gitleaks" bash scripts/review_public_tree.sh --probe

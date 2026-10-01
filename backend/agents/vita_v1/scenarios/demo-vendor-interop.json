@@ -1,0 +1,24 @@
+{
+  "name": "Demo: SSO handshake fails between Acme Identity Cloud and Zenith Service Desk",
+  "description": "The canned demo/CI smoke case (blueprint B7/B14): a SAML single sign-on integration between a fictional identity provider and a fictional ITSM tool starts failing after a certificate rotation. Sanitized logs on both sides.",
+  "user_inputs": {
+    "vendor_a": {
+      "name": "Acme Identity Cloud",
+      "product": "AcmeID SSO Gateway 24.3",
+      "feature": "SAML 2.0 IdP-initiated single sign-on",
+      "observation": "Signing certificate was rotated on schedule; the admin console shows assertions issued successfully and signed with the new certificate. No errors on the IdP side."
+    },
+    "vendor_b": {
+      "name": "Zenith Service Desk",
+      "product": "Zenith ITSM Suite 11.2",
+      "feature": "SAML 2.0 service-provider login",
+      "observation": "All SSO logins started failing at 09:14 UTC with 'Signature validation failed'. Local (non-SSO) admin login still works. The SP metadata still lists the previous IdP certificate."
+    },
+    "logs_a": "2026-08-12T09:14:02Z INFO  acmeid.saml  AssertionIssued entityId=https://sso.acme-identity.example/idp audience=https://desk.zenith.example/sp certSerial=5A:11:0F:2C\n2026-08-12T09:14:02Z DEBUG acmeid.saml  SignatureAlgorithm=rsa-sha256 digest=sha256 keyRef=idp-signing-2026\n2026-08-12T09:16:41Z WARN  acmeid.saml  MetadataPublish sp=https://desk.zenith.example/sp lastFetchedByPeer=41d ago",
+    "logs_b": "2026-08-12T09:14:03Z ERROR zenith.auth.saml  SignatureValidationFailed reason=CERT_MISMATCH assertionId=_9f3d21 issuer=https://sso.acme-identity.example/idp expectedCertSerial=1B:77:A2:90 presentedCertSerial=5A:11:0F:2C\n2026-08-12T09:14:03Z INFO  zenith.auth.saml  FallbackLocalLogin enabled=true\n2026-08-12T09:20:15Z ERROR zenith.auth.saml  SignatureValidationFailed reason=CERT_MISMATCH assertionId=_a01c77 issuer=https://sso.acme-identity.example/idp expectedCertSerial=1B:77:A2:90 presentedCertSerial=5A:11:0F:2C",
+    "use_case": "Employees sign in to Zenith Service Desk through Acme Identity Cloud SAML single sign-on; the help-desk team depends on it for every shift handover and ticket escalation.",
+    "problem_statement": "After Acme Identity Cloud rotated its SAML signing certificate, every SSO login to Zenith Service Desk fails with 'Signature validation failed' even though the IdP reports assertions issued successfully.",
+    "impact_statement": "Around 300 support agents cannot reach the ticketing system through SSO and are working from a shared local admin account, which violates the customer's access-control policy.",
+    "severity": "high"
+  }
+}

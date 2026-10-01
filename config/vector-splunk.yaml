@@ -1,0 +1,119 @@
+# ============================================================================
+# LibreRun — Vector Splunk overlay (blueprint S7a, decision L26)
+#
+# Merged on top of vector.yaml + vector-otlp-shape.yaml when
+# LIBRERUN_OBS_VENDOR=splunk:
+#
+#   1. LIBRERUN_OBS_VENDOR=splunk in .env  (the SELECTOR lives in .env,
+#      because compose expands it while building Vector's command line —
+#      an env_file is read by the container, too late for that)
+#   2. the SPLUNK_* values in observability.env
+#   3. ./compose.sh --profile obs up -d
+#      (the `obs` profile starts otel-bridge, which the trace leg needs;
+#       env changes RECREATE containers — a bare `restart` keeps the old
+#       env)
+#
+# Splunk splits the two legs across two products, so the two halves take
+# two credentials. Both planes ride each leg; every hop off the box
+# dials OUT:
+#
+#   logs   (backend JSONL + OTel log records) --> Splunk HEC
+#          the native `splunk_hec_logs` sink, which POSTs the documented
+#          HEC event JSON to <endpoint>/services/collector/event.
+#          SPLUNK_HEC_URL     base URL, NO path (the sink appends
+#                             /services/collector/event itself), e.g.
+#                             https://http-inputs-<host>.splunkcloud.com:443
+#          SPLUNK_HEC_TOKEN   the HEC token, sent as
+#                             `Authorization: Splunk <token>`
+#          SPLUNK_INDEX / SPLUNK_SOURCETYPE tune where it lands.
+#
+#   traces (every span) --> otel-bridge --> Splunk Observability ingest
+#          The sink below posts the wire-shaped OTLP/JSON to the
+#          in-network bridge (config/otel-bridge-splunk.yaml), which
+#          re-exports OTLP PROTOBUF over HTTP. That indirection is
+#          load-bearing: Splunk Observability's OTLP trace path,
+#          /v2/trace/otlp, documents `Content-Type:
+#          application/x-protobuf`, and Vector cannot emit OTLP protobuf
+#          (its native `opentelemetry` sink is unusable for traces, per
+#          vector.yaml's gallery note).
+#          SPLUNK_OTLP_URL       full path, e.g.
+#                                https://ingest.<realm>.observability.splunkcloud.com/v2/trace/otlp
+#          SPLUNK_ACCESS_TOKEN   the org access token, sent in the
+#                                `X-SF-Token` header Splunk documents —
+#                                a DIFFERENT credential from the HEC
+#                                token above.
+#
+# This overlay FORWARDS; it never redacts. Both planes reach Vector
+# already walked — S4's walkers and the authenticated relay are the only
+# way telemetry enters the box — so redacting again here would only be a
+# second, weaker copy of the one walker.
+#
+# Before forwarding run-plane traces off-box, consider
+# OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=NO_CONTENT in .env:
+# by default those spans carry LLM prompt/completion content.
+# ============================================================================
+
+transforms:
+  # The vendor's reserved service field, lifted from the OTLP resource
+  # where there is one. `otlp.logs` events — container agents through
+  # S4's authenticated relay, the browser ux plane through the RUM relay
+  # — carry their resource under `.resources`; the backend's own JSONL
+  # lines, tailed from ./data/logs, carry none, because the file IS the
+  # backend's and its resource identity is the backend's service name.
+  #
+  # Splunk reads a flat field name, so `service.name` is set as one key
+  # rather than a nested object. Nothing is removed and `.resources` is
+  # not invented: an event that arrived with one keeps it exactly as
+  # Vector holds it, so the identity a vendor reads is the emitter's
+  # own. (The contract test in .github/workflows/obs-vendors.yml decodes
+  # the intake payload and requires that resource back, which is what
+  # makes dropping it fail.)
+  splunk_logs_shape:
+    type: remap
+    inputs:
+      - otlp.logs
+      - backend_logs
+    source: |
+      svc = to_string(.resources."service.name") ?? ""
+      if svc == "" {
+        svc = "${LIBRERUN_OBS_SERVICE_NAME:-librerun-backend}"
+      }
+      ."service.name" = svc
+
+sinks:
+  splunk_hec_logs:
+    type: splunk_hec_logs
+    inputs:
+      - splunk_logs_shape
+    # Base URL, no path. Empty is deliberate: an overlay selected with
+    # nothing configured must fail loudly at start-up rather than
+    # quietly drop the stream. Check: ./compose.sh logs -f vector
+    endpoint: "${SPLUNK_HEC_URL:-}"
+    default_token: "${SPLUNK_HEC_TOKEN:-}"
+    index: "${SPLUNK_INDEX:-main}"
+    sourcetype: "${SPLUNK_SOURCETYPE:-librerun}"
+    encoding:
+      codec: json
+
+  splunk_traces:
+    type: http
+    inputs:
+      - obs_otlp_shape
+    # The in-network bridge (compose `obs` profile) — NOT Splunk. It
+    # converts OTLP/JSON to the protobuf /v2/trace/otlp requires and
+    # owns the ingest URL and the X-SF-Token header
+    # (config/otel-bridge-splunk.yaml).
+    uri: "http://otel-bridge:4318/v1/traces"
+    method: post
+    encoding:
+      codec: json
+    # One OTLP envelope per request: OTLP receivers take a single JSON
+    # document, so batching into an array would be rejected. Fine at
+    # demo/dev volumes; revisit for heavy production span rates.
+    batch:
+      max_events: 1
+    framing:
+      method: newline_delimited
+    request:
+      headers:
+        Content-Type: application/json

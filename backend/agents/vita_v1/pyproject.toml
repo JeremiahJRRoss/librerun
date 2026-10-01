@@ -1,0 +1,61 @@
+# VITA packaged as an installable LibreRun agent (blueprint B12).
+#
+# Two supported install modes, identical runtime contract either way:
+#   1. Directory install — this folder sits under the chassis agents
+#      directory (LIBRERUN_AGENTS_PATH, default ./agents) and is imported
+#      as agents.vita_v1. This file is inert in that mode.
+#   2. Pip install — `pip install ./agents/vita_v1` (from the chassis
+#      venv) installs the package as top-level `vita_v1` with the
+#      distribution name `vita-agent`; the librerun.agents entry point
+#      below lets the chassis discover it with no agents-directory
+#      presence at all.
+# The package uses relative imports internally so both import names work.
+#
+# The LibreRun chassis itself (the app.* modules this agent calls for
+# config, models, orchestration, and logging) is a HOST requirement, not
+# a pip dependency — install vita-agent into the chassis' environment.
+# Moving VITA to its own GitHub repository is a follow-on admin task.
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vita-agent"
+version = "1.0.0"
+description = "VITA — Vendor Interoperability Troubleshooting Agent, an installable LibreRun agent"
+requires-python = ">=3.12"
+# L36: AGPL-3.0-only, the licence scope map's default, the bundled agent
+# included (docs/release/License_Scope_Map.md).
+# The VERSION above is the agent's own and is deliberately NOT the
+# platform's: an agent is a plug-in with its own release line, and the
+# single-version check exempts it by name for that reason (S9).
+license = "AGPL-3.0-only"
+# Direct third-party imports of this package only; everything else comes
+# from the chassis environment.
+dependencies = [
+    "httpx",
+    "jinja2",
+    "markupsafe",
+    "openinference-semantic-conventions>=0.1.9",
+    "pydantic",
+    "structlog",
+]
+
+[project.entry-points."librerun.agents"]
+vita-v1 = "vita_v1"
+
+[tool.setuptools]
+# The package root is this directory itself: install its modules as
+# top-level `vita_v1` (+ the steps subpackage). tests/ stays repo-only.
+package-dir = { "vita_v1" = ".", "vita_v1.steps" = "steps" }
+packages = ["vita_v1", "vita_v1.steps"]
+
+[tool.setuptools.package-data]
+# The agent contract's non-code assets: manifest, report template, and
+# demo scenarios must ship in the wheel — discovery reads agent.yaml (and
+# serves scenarios) from the installed package directory. Nothing here is
+# written at run time: the agent's settings are declared in agent.yaml
+# and valued per tenant by the platform (K5b), so read-only site-packages
+# needs nothing more.
+vita_v1 = ["agent.yaml", "report.html", "scenarios/*.json"]

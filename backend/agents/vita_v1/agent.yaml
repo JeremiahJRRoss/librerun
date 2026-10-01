@@ -1,0 +1,210 @@
+# VITA agent manifest (blueprint B7 — agent manifest v1).
+#
+# The chassis reads this file for everything it needs to know about the
+# agent: identity, runtime, the phase list the runner walks, output mode,
+# feedback sections, scenarios, and UI hints. The class in agent.py stays
+# the execution vehicle; this file is the contract.
+manifest_version: 1
+
+id: vita-v1
+name: VITA Vendor Troubleshooter
+description: Investigates interoperability issues between two vendor products
+
+# Only python-package agents execute until the container runner lands
+# (blueprint B12a); the field is validated against both values today.
+runtime: python-package
+
+# analyze parks its output for human review (the gate on investigate);
+# approving resumes into investigate, whose result completes the run.
+phases:
+  - name: analyze
+    # The progress rows this phase reports (the orchestrator's step ids)
+    # and the label the run page shows for each (blueprint S7). These
+    # labels used to be a table inside the chassis's ProgressList
+    # component — agent vocabulary in the platform, which is exactly what
+    # this file exists to hold instead.
+    steps:
+      - id: validate_and_classify_inputs
+        label: Validate & classify inputs
+      - id: refine_problem_statement
+        label: Refine problem statement
+  - name: investigate
+    approval: true
+    steps:
+      - id: construct_search_queries_vendor_a
+        label: Query construction (Vendor A)
+      - id: construct_search_queries_vendor_b
+        label: Query construction (Vendor B)
+      - id: search_internal_kb
+        label: Search internal knowledge base
+      - id: search_public_resources
+        label: Search public resources
+      - id: assess_skills
+        label: Assess skills
+      - id: generate_resolution_plan
+        label: Generate resolution plan
+      - id: generate_followup_questions
+        label: Generate follow-up questions
+
+output:
+  mode: html_report
+
+# Feedback targets the results view offers thumbs on. The frontend
+# consumes these from the manifest in blueprint B9 (it hardcodes the same
+# four until then).
+feedback_sections:
+  - id: refined_problem
+    label: Refined problem statement
+  - id: mitigation
+    label: Immediate mitigation
+  - id: resolution
+    label: Root cause resolution
+  - id: avoidance
+    label: Future avoidance
+
+# Directory (relative to this file) of demo scenario JSON files served at
+# GET /agents/vita-v1/scenarios.
+scenarios: scenarios
+
+# Declarative-only until the capability façade lands (blueprint B13).
+# Enforced as the façade grant since blueprint B13: llm/kb/progress/audit
+# are chassis capabilities VITA consumes; web-search stays a declarative
+# slug (VITA's own Tavily client, agent-owned).
+capabilities:
+  - llm
+  - kb
+  - progress
+  - audit
+  - web-search
+
+# The third-party tool secrets this agent reads by name (K8a, D20): its
+# web-search key. Each tenant's admin sets this tenant's value on the
+# agent page, a platform admin every tenant's default, and the backend's
+# TAVILY_API_KEY serves while neither is set. Unset means no web results.
+secrets:
+  - tavily_api_key
+
+# The three settings a run reads (K5b, D31), with the values the code
+# hard-coded until then as their defaults, so a tenant that never chose
+# one sees no change. Each tenant's admin sets this tenant's values on
+# the agent page's Settings tab; a run reads them through
+# caps.config.settings() when its phase starts, clamps each integer to
+# the range its description gives, and stamps what it used on the step
+# spans' input.value. The state-directory overlay these lived in is
+# gone with config.json, and its values are not carried over (D18).
+settings:
+  - key: tavily_search_depth
+    label: Tavily search depth
+    type: enum
+    options: [basic, advanced]
+    default: advanced
+    description: Tavily web-search depth. 'advanced' is higher quality but slower.
+  - key: pinecone_top_k
+    label: Pinecone top K
+    type: int
+    default: 10
+    description: Number of internal-KB results to retrieve per query, from 1 to 50; a value outside that range is read as the nearer bound.
+  - key: max_retries_per_step
+    label: Max retries per step
+    type: int
+    default: 2
+    description: How many times a single pipeline step retries on transient failure, from 0 to 5; a value outside that range is read as the nearer bound.
+
+# The LLM steps this agent calls, with the model defaults it ships
+# (blueprint S4a, L25). This block replaced the `pipeline` section of
+# config.json, which was one file shared by every tenant: the admin
+# agent-configuration page now edits the effective values PER TENANT and
+# the gateway resolves them at request time, so a model change needs no
+# redeploy and one tenant's edit cannot overwrite another's.
+#
+# Two steps of the old block are not here on purpose — the knowledge-base
+# search and the web search call no model, so they have no model
+# configuration to edit. They remain progress steps on the run page.
+llm:
+  steps:
+    - id: validate_and_classify_inputs
+      label: "Content validation + input classification"
+      provider: "openai"
+      model: "gpt-4o"
+      temperature: 0.0
+      max_tokens: 1000
+      timeout_seconds: 30
+    - id: generate_log_hints
+      label: "Contextual log guidance on wizard Step 2 load"
+      provider: "openai"
+      model: "gpt-4o"
+      temperature: 0.0
+      max_tokens: 1500
+      timeout_seconds: 10
+    - id: refine_problem_statement
+      label: "Problem statement refinement (customer reviews before Phase 2)"
+      provider: "anthropic"
+      model: "claude-sonnet-4-6"
+      temperature: 0.0
+      max_tokens: 2000
+      timeout_seconds: 60
+    - id: construct_search_queries_vendor_a
+      label: "Search query construction for Vendor A"
+      provider: "openai"
+      model: "gpt-4o"
+      temperature: 0.0
+      max_tokens: 800
+      timeout_seconds: 15
+    - id: construct_search_queries_vendor_b
+      label: "Search query construction for Vendor B"
+      provider: "openai"
+      model: "gpt-4o"
+      temperature: 0.0
+      max_tokens: 800
+      timeout_seconds: 15
+    - id: assess_skills
+      label: "Skills assessment from search results"
+      provider: "anthropic"
+      model: "claude-sonnet-4-6"
+      temperature: 0.0
+      max_tokens: 1500
+      timeout_seconds: 60
+    - id: generate_resolution_plan
+      label: "Resolution plan generation (top-tier model)"
+      provider: "anthropic"
+      model: "claude-opus-4-6"
+      temperature: 0.0
+      max_tokens: 8000
+      timeout_seconds: 180
+    - id: generate_followup_questions
+      label: "Follow-up question generation"
+      provider: "anthropic"
+      model: "claude-sonnet-4-6"
+      temperature: 0.0
+      max_tokens: 1000
+      timeout_seconds: 60
+
+ui:
+  # The run list shows the problem statement as the run's title, and the
+  # approval view shows the refined statement (blueprint S2) — both are
+  # dotted paths the chassis resolves; it knows neither field by name.
+  list:
+    title_path: problem_statement
+  approval:
+    summary_path: refined_problem.refined_problem_statement
+  # Schema-driven stepped intake (blueprint B8) — the same seven-step flow
+  # the bespoke wizard used to hard-code (the chassis appends the final
+  # Review step itself). Field names refer to input_schema() properties.
+  intake:
+    steps:
+      - title: Vendors
+        fields: [vendor_a, vendor_b]
+      - title: Logs
+        description: PII will be redacted automatically before storage.
+        fields: [logs_a, logs_b]
+      - title: Use Case
+        fields: [use_case]
+      - title: Problem
+        fields: [problem_statement]
+      - title: Impact
+        fields: [impact_statement, severity]
+      - title: Configs
+        description: >-
+          Config file upload — redact-preview only (attach during
+          investigation later). Optional — skip for now.
+        fields: []

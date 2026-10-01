@@ -1,0 +1,52 @@
+# The LibreRun gateway image (blueprint S4a).
+#
+# Deliberately NOT the backend's list. This process holds the provider
+# credentials and nothing else: no JWT signing, no report rendering, no
+# vector store, no web search. What it does share is the chassis's
+# redaction and export walkers, which is why presidio, spacy and the
+# OTLP exporter appear here — the gateway's own spans and log lines are
+# walked exactly like the backend's, and the outbound redaction is the
+# same pii_service the intake pipeline runs.
+fastapi==0.141.1
+uvicorn[standard]
+sqlalchemy[asyncio]
+asyncpg
+pydantic
+pydantic-settings
+httpx
+structlog
+redis[hiredis]
+
+# The egress library (D9, L24). Used as a LIBRARY, not as its proxy
+# server: one code path for every provider, with the cost table the LLM
+# span's librerun.cost_usd comes from. One exact version, with no extra:
+# an extra is how the proxy and its Enterprise code come in (C-19 to
+# C-21), and a new release is a reviewed relock
+# (scripts/lock_requirements.sh), checked as A3 checked this one.
+litellm==1.103.1
+
+# The gateway's own rows in the secrets store and the sealing keypair
+# (K7; D14, D15): MultiFernet through the chassis's app/secrets_keyring.py,
+# and RSA-OAEP to open a provider key the browser sealed. A direct
+# dependency: the image installs this file's lock alone (Dockerfile; A3),
+# requirements.lock.txt, whose provenance this file stays, and until K7
+# the gateway reached `cryptography` only in CI, through the backend's
+# list gateway.yml then installed beside it (K7-12). The floor is the
+# backend's locked release.
+cryptography>=48.0.1
+
+# The chassis's redaction pipeline, shared with the backend.
+presidio-analyzer
+presidio-anonymizer
+spacy
+
+# Telemetry: the gateway writes the one LLM span and installs S4's export
+# walkers, so it needs the SDK and the OTLP exporter, not an
+# instrumentation package per provider — LiteLLM's own recorders are
+# deliberately never enabled.
+opentelemetry-api
+opentelemetry-sdk
+opentelemetry-exporter-otlp
+
+pytest
+pytest-asyncio

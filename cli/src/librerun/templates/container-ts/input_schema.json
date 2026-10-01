@@ -1,0 +1,24 @@
+{
+  "type": "object",
+  "title": "Ask __AGENT_NAME__",
+  "required": ["question"],
+  "additionalProperties": false,
+  "properties": {
+    "question": {
+      "type": "string",
+      "title": "Question",
+      "description": "Redacted by the intake pipeline before the container sees it.",
+      "minLength": 1,
+      "maxLength": 2000,
+      "x-ui-widget": "textarea",
+      "x-pii": true
+    },
+    "context": {
+      "type": "string",
+      "title": "Anything the answer should take into account",
+      "maxLength": 4000,
+      "x-ui-widget": "textarea",
+      "x-pii": true
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "Demo: answer with a tool available",
+  "description": "Asks the Vercel AI SDK agent about a service, with the one declared tool available for it to call.",
+  "user_inputs": {
+    "question": "Checkout has been slow since this morning. What does the status board say, and what should the on-call engineer look at first?",
+    "service": "checkout"
+  }
+}

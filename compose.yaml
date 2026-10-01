@@ -1,0 +1,872 @@
+# ============================================================================
+# LibreRun — Container Compose (works with docker compose AND podman compose)
+# Platform chassis + the bundled demo agent. Containers are named librerun-*;
+# existing deployments must recreate containers on upgrade (data volumes
+# keep their names and are unaffected) — see Install.md.
+#
+# Usage:
+#   docker compose up -d          # Docker
+#   podman compose up -d          # Podman
+#   ./compose.sh up -d            # Auto-detects (see compose.sh)
+#
+# Profiles:
+#   default                       # postgres + redis + vector (for local dev)
+#   --profile app                 # adds backend + frontend
+#   --profile viewer              # adds the bundled Jaeger trace viewer
+#                                 # (pair with VECTOR_VIEWER=1 in .env so
+#                                 # Vector forwards traces to it)
+#   --profile obs                 # adds the OTLP protobuf bridge, which the
+#                                 # vendor overlays' trace leg needs (pair
+#                                 # with LIBRERUN_OBS_VENDOR in .env —
+#                                 # docs/platform/Observability.md)
+#   --profile full                # all services including observability
+#   --profile tls                 # adds the HTTPS edge in front of the app
+#                                 # (with --profile app; compose.sh refuses
+#                                 # it unless the plain ports stay on
+#                                 # loopback — docs/platform/Install.md,
+#                                 # "HTTPS at the edge")
+# ============================================================================
+
+# Agent containers live in their own fragment (blueprint S4): one service
+# per container agent on the internal ``agents`` network. Compose v2.20+
+# / podman-compose 1.1+ merge it in.
+include:
+  - agents.compose.yaml
+
+networks:
+  # The chassis's own network: every platform service, the frontend's
+  # host route, the operator's ports.
+  default:
+  # Agent containers only (with the backend beside them). ``internal``:
+  # no NAT route off the host, so an agent reaches nothing but the
+  # chassis — the run-scoped MCP server and the OTLP relay — and no path
+  # to Vector, Postgres, Redis or the Internet exists.
+  agents:
+    internal: true
+  # The opt-out: an agent whose manifest declares ``network.egress: true``
+  # also joins this non-internal network in its fragment.
+  egress:
+  # The HTTPS edge's network (K blueprint T1, D37): the `edge` service,
+  # `edge-control` (T2), the backend and the web UI, and no agent. Not
+  # internal: ACME needs a route
+  # out. The subnet is fixed and small, and by default clear of both
+  # engines' default pools — Docker's 172.17-172.31.x.x/16 and
+  # 192.168.x.x/20 (and 10.x.x.x for swarm), Podman's 10.88.0.0/16 and up
+  # — so the edge can hold a fixed address, .2, which is the one address
+  # the backend trusts forwarding headers from (FORWARDED_ALLOW_IPS below).
+  # `ip_range` keeps every dynamic address off it: without it a backend
+  # started before the edge could take .2 itself.
+  #
+  # Every start creates this network, profile or not, since the backend
+  # and the web UI join it, and an engine refuses a subnet another network
+  # already holds ("Pool overlaps"). So its first three octets are one
+  # line, LIBRERUN_EDGE_NET (default 172.16.87): a second LibreRun on this
+  # host, or a network already on 172.16.87.0/28, moves it, and the
+  # subnet, the range, the gateway, the edge's address and the backend's
+  # trust all follow from that one value.
+  edge:
+    ipam:
+      config:
+        - subnet: "${LIBRERUN_EDGE_NET:-172.16.87}.0/28"
+          ip_range: "${LIBRERUN_EDGE_NET:-172.16.87}.8/29"
+          gateway: "${LIBRERUN_EDGE_NET:-172.16.87}.1"
+
+services:
+  # --------------------------------------------------------------------------
+  # PostgreSQL 16
+  # --------------------------------------------------------------------------
+  postgres:
+    image: docker.io/library/postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    container_name: librerun-postgres
+    environment:
+      # Env-parameterised (blueprint S2) so a deployment created before
+      # the rename keeps the database and role names its volume already
+      # carries by pinning them in .env — docs/platform/Install.md, "Upgrading an
+      # existing deployment" (the chassis-purity gate keeps the old names
+      # out of this file; the guide spells them).
+      POSTGRES_DB: ${POSTGRES_DB:-librerun}
+      POSTGRES_USER: ${POSTGRES_USER:-librerun}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-librerun_dev_pw}
+    ports:
+      # Loopback-only: host-side psql access without exposing the DB to
+      # other machines. In-cluster consumers use the compose network.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./backend/db/schema.sql:/docker-entrypoint-initdb.d/001_schema.sql:ro,Z
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-librerun} -d ${POSTGRES_DB:-librerun}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # --------------------------------------------------------------------------
+  # Valkey 8 — the cache server, under the `redis` name (L38). The service,
+  # its container, its volume, REDIS_URL and the redis:// scheme keep their
+  # names, since Valkey speaks the same protocol (C-17).
+  # --------------------------------------------------------------------------
+  redis:
+    image: docker.io/valkey/valkey:8-alpine@sha256:081c2f5cb575efc901aa80ff9cdbd1ec6a301682fd35e1ebb4b0990a4a4a8507
+    container_name: librerun-redis
+    ports:
+      # Loopback-only: Valkey runs with no auth — never publish beyond
+      # localhost. In-cluster consumers use the compose network.
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # --------------------------------------------------------------------------
+  # Vector — the telemetry spine (blueprint B4, decision L3). One router for
+  # traces and logs: OTLP in from the backend, backend JSON log file tailed,
+  # console debug sink on by default, forwarding configured in
+  # config/vector.yaml (commented sink gallery). Runs in the default profile
+  # so `./compose.sh up -d` brings it up alongside postgres + redis.
+  # --------------------------------------------------------------------------
+  vector:
+    image: docker.io/timberio/vector:0.50.0-alpine@sha256:93761c26fa3a3793f5f200de0f4cfc6102b5e9803ab33b4830d0873ba8dbdc4f
+    container_name: librerun-vector
+    # Shell form so the viewer overlay is appended only when VECTOR_VIEWER
+    # is set (compose's :+ interpolation): base config alone otherwise —
+    # an always-on Jaeger forward would buffer/backpressure when the
+    # viewer profile isn't running.
+    #
+    # ``entrypoint`` MUST be overridden alongside it: the image declares
+    # ENTRYPOINT ["/usr/local/bin/vector"], so a bare shell-form
+    # ``command`` is appended as ARGUMENTS TO VECTOR — the container then
+    # runs ``vector sh -c "exec vector …"``, which exits 2 on an
+    # unrecognized subcommand and crash-loops forever. Verified against
+    # vector 0.50.0: `vector sh -c '…'` → "error: unrecognized subcommand
+    # 'sh'".
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - exec vector --config /etc/vector/vector.yaml ${VECTOR_VIEWER:+--config /etc/vector/vector-viewer.yaml} ${VECTOR_CRIBL:+--config /etc/vector/vector-cribl.yaml} ${LIBRERUN_OBS_VENDOR:+--config /etc/vector/vector-otlp-shape.yaml --config /etc/vector/vector-${LIBRERUN_OBS_VENDOR:-}.yaml}
+    environment:
+      # ONLY the three parse-time selectors and the viewer's endpoint
+      # are here (K4). Every other value Vector reads — the sink
+      # gallery, the Cribl HEC pair, each vendor's endpoints and tokens
+      # — arrives through observability.env below, because a name that
+      # appears in `environment:` beats the same name in an `env_file`,
+      # so an empty default here would silently win over the file. That
+      # is the same blank-override failure K1 removed the gateway's
+      # three provider lines for.
+      #
+      # These four stay because they are not the container's to read:
+      # compose expands the `:+` in the command above at PARSE time,
+      # before this container exists, and an env_file is read by the
+      # container. They are passed through as well so the same command
+      # string still resolves correctly if it ever reaches the shell
+      # unexpanded (older interpolation, `docker run` by hand). All four
+      # are class-[1] lines of .env.example.
+      VECTOR_VIEWER: ${VECTOR_VIEWER:-}
+      # Consumed by config/vector-viewer.yaml when VECTOR_VIEWER=1.
+      VECTOR_JAEGER_ENDPOINT: ${VECTOR_JAEGER_ENDPOINT:-http://jaeger:4318/v1/traces}
+      # Cribl forwarding overlay (config/vector-cribl.yaml): VECTOR_CRIBL=1
+      # loads it via the command above; the HEC endpoint and token are
+      # resolved by Vector inside that file, from observability.env.
+      # Traces go via the otel-bridge service below (`--profile cribl`),
+      # which owns the CRIBL_OTLP_* values and its own file.
+      VECTOR_CRIBL: ${VECTOR_CRIBL:-}
+      # Vendor overlay selector (blueprint S7a): datadog | elastic |
+      # splunk, or empty for none.
+      LIBRERUN_OBS_VENDOR: ${LIBRERUN_OBS_VENDOR:-}
+    # The LOG leg's endpoints and credentials (blueprint S7a) and, since
+    # K4, the sink gallery and the Cribl HEC pair — optional: a stack
+    # with no overlay selected has no such file and nothing changes.
+    # Copied from observability.env.example. Kept out of .env so the
+    # backend, the gateway and the frontend never hold somebody else's
+    # API key, and separate from the bridge's observability-traces.env
+    # so neither process is handed the other's credentials (L28, Gate P).
+    env_file:
+      - path: ./observability.env
+        required: false
+    ports:
+      # Loopback-only: host-side processes (dev-mode backend, local tools)
+      # can ship OTLP to localhost; in-cluster emitters use vector:4317.
+      - "127.0.0.1:${VECTOR_OTLP_GRPC_PORT:-4317}:4317"
+      - "127.0.0.1:${VECTOR_OTLP_HTTP_PORT:-4318}:4318"
+    volumes:
+      - ./config/vector.yaml:/etc/vector/vector.yaml:ro,Z
+      # Viewer overlay — inert unless VECTOR_VIEWER adds it to the command.
+      - ./config/vector-viewer.yaml:/etc/vector/vector-viewer.yaml:ro,Z
+      # Cribl overlay — inert unless VECTOR_CRIBL adds it to the command.
+      - ./config/vector-cribl.yaml:/etc/vector/vector-cribl.yaml:ro,Z
+      # Vendor overlays (blueprint S7a) — inert unless LIBRERUN_OBS_VENDOR
+      # adds a pair to the command. The shaping file always rides with a
+      # vendor file: the vendor's trace sink reads its `obs_otlp_shape`
+      # transform, so Vector refuses a config carrying one without the
+      # other.
+      - ./config/vector-otlp-shape.yaml:/etc/vector/vector-otlp-shape.yaml:ro,Z
+      - ./config/vector-datadog.yaml:/etc/vector/vector-datadog.yaml:ro,Z
+      - ./config/vector-elastic.yaml:/etc/vector/vector-elastic.yaml:ro,Z
+      - ./config/vector-splunk.yaml:/etc/vector/vector-splunk.yaml:ro,Z
+      # Tail the same JSON log file the backend bind-mounts (read-only).
+      - ./data/logs:/var/log/librerun:ro,Z
+      - librerun-vector-data:/var/lib/vector
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8686/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # --------------------------------------------------------------------------
+  # LLM gateway — the one process that holds a provider credential
+  # (blueprint S4a, L23/L24/L25).
+  #
+  # In the DEFAULT set, with no profile: the backend cannot complete a run
+  # without it, and a local `uvicorn` needs it running from
+  # `./compose.sh up -d` like Postgres and Redis.
+  #
+  # Its environment is deliberately small and deliberately its own. The
+  # provider credentials reach this service and no other — through
+  # gateway.env, which nothing else loads (K1, decision L28);
+  # APP_SECRET_KEY and the INITIAL_* bootstrap credentials are NOT here,
+  # because a process that holds provider credentials has no business
+  # also being able to mint a session. The per-agent keys arrive through
+  # `agent-keys.env`, which compose.sh derives from the
+  # LIBRERUN_AGENT_KEY_* variables of the environment and the lines of
+  # .env, and from nothing else in either.
+  # --------------------------------------------------------------------------
+  gateway:
+    image: ${LIBRERUN_IMAGE_PREFIX:-localhost/librerun}/librerun-gateway:${LIBRERUN_IMAGE_TAG:-dev}
+    pull_policy: build
+    build:
+      context: .
+      dockerfile: services/gateway/Dockerfile
+    container_name: librerun-gateway
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # Beside its default network, the internal ``agents`` network: an
+    # agent container reaches the gateway there and nowhere else.
+    networks:
+      - default
+      - agents
+    # Every LIBRERUN_AGENT_KEY_* variable of the environment and line of
+    # .env, and nothing else from either. compose.sh regenerates this
+    # file before every command; it is git-ignored.
+    #
+    # …and gateway.env, the operator's own file: OPENAI_API_KEY,
+    # ANTHROPIC_API_KEY and GOOGLE_AI_API_KEY (K1, decision L28). They
+    # are delivered here rather than interpolated into `environment:`
+    # below because an `environment:` entry OVERRIDES an env_file entry
+    # even when it interpolates to blank — a `${…:-}` line for one of
+    # these names, with nothing in .env, would blank the key this file
+    # just delivered. `required: false`, because the keyless demo has no
+    # such file and must still boot. Copy gateway.env.example to start
+    # one; it is git-ignored, like agent-keys.env.
+    #
+    # The path is a variable (K3, decision L30) so a deployment that keeps
+    # no plaintext gateway.env on disk can name the temporary file
+    # `sops exec-file` decrypts into — docs/platform/Install.md, "Encrypting .env
+    # at rest". Unset, it is the file beside compose.yaml, as before; the
+    # committed example lives beside that default, and the two compose
+    # guards read the default when they derive what this service
+    # receives.
+    env_file:
+      - path: agent-keys.env
+        required: false
+      - path: ${LIBRERUN_GATEWAY_ENV_FILE:-gateway.env}
+        required: false
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-librerun}:${POSTGRES_PASSWORD:-librerun_dev_pw}@postgres:5432/${POSTGRES_DB:-librerun}
+      REDIS_URL: redis://redis:6379/0
+      # Keyless mode (D4). The one switch that decides it for the whole
+      # deployment; /api/v1/meta reports it by asking /healthz here.
+      LIBRERUN_STUB_LLM: ${LIBRERUN_STUB_LLM:-false}
+      # The provider credentials are NOT in this block: they arrive
+      # through gateway.env, the env_file above, which is the only file
+      # in the deployment that holds one. See the note there.
+      # An OpenAI-compatible endpoint to route OpenAI steps at, when the
+      # deployment has one. Declared in the gateway's settings and used
+      # for every OpenAI call — but never passed here, so in the standard
+      # compose deployment the setting was inert and calls went to
+      # OpenAI's own endpoint whatever the operator set (Codex P1).
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      # The platform's own embedding step, when no kb.embed_model setting
+      # row exists (the settings page writes one).
+      LIBRERUN_KB_EMBED_MODEL: ${LIBRERUN_KB_EMBED_MODEL:-openai/text-embedding-3-small}
+      # How long an ADMIN rotation leaves the previous key working. An
+      # env-provisioned key is rotated in .env instead, with a _PREVIOUS
+      # line, and is not governed by this.
+      LIBRERUN_KEY_ROTATION_GRACE_HOURS: ${LIBRERUN_KEY_ROTATION_GRACE_HOURS:-24}
+      # The gateway's own spans and log lines go through S4's walkers on
+      # the way out, like the backend's.
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT-http://vector:4317}
+      OTEL_EXPORTER_OTLP_PROTOCOL: ${OTEL_EXPORTER_OTLP_PROTOCOL:-grpc}
+      OTEL_SERVICE_NAME: librerun-gateway
+      # Whether the LLM span keeps prompt and completion content. It
+      # lives HERE now, with the provider keys: this is the process that
+      # makes the call. Content it keeps is walked either way.
+      OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: ${OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT:-}
+      PII_CONFIDENCE_THRESHOLD: ${PII_CONFIDENCE_THRESHOLD:-0.7}
+      # The SAME redaction settings the backend gets, because the
+      # gateway runs the SAME walker: it imports `app.services.
+      # pii_service`, which reads these from `app.config.settings`
+      # — not from GatewaySettings, which is why the guard that
+      # watches this block did not see them. Passed to one service
+      # and not the other, the two processes redact to different
+      # strengths: a phone number the backend refuses passed this
+      # walker unchanged and reached a provider, because the region
+      # here stayed `US` (Codex P1).
+      PII_PHONE_REGION: ${PII_PHONE_REGION:-US}
+      # Blueprint S4c, and the same lesson as the two above: the
+      # detector's fail-closed policy is one policy or it is none. This
+      # process runs the chassis's own `pii_service` for outbound
+      # redaction, so an opt-out honoured by the backend and not here
+      # would leave one door refusing and the other passing names to a
+      # provider. Default false: the platform fails closed unless an
+      # operator says otherwise, in `.env`, for both.
+      LIBRERUN_PII_ALLOW_DEGRADED: ${LIBRERUN_PII_ALLOW_DEGRADED:-false}
+      LOG_REDACT_PII: ${LOG_REDACT_PII:-true}
+      # How much this process logs. Every record is walked before any
+      # handler sees it (``services/gateway/gateway/logs.py``), so this
+      # governs volume, not exposure. The same variable the backend
+      # reads, deliberately: one dial for the deployment.
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "127.0.0.1:${GATEWAY_PORT:-8090}:8090"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/healthz', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    restart: unless-stopped
+
+  # --------------------------------------------------------------------------
+  # Jaeger — the bundled trace viewer (blueprint B5, decisions L8 + D1).
+  # Optional: ./compose.sh --profile viewer up -d, paired with
+  # VECTOR_VIEWER=1 in .env so Vector forwards traces to it. The UI is
+  # loopback-published; OTLP ingest stays compose-network-only (Vector is
+  # the only emitter).
+  # --------------------------------------------------------------------------
+  jaeger:
+    image: docker.io/jaegertracing/all-in-one:1.66.0@sha256:9864182b4e01350fcc64631bdba5f4085f87daae9d477a04c25d9cb362e787a9
+    container_name: librerun-jaeger
+    profiles: ["viewer", "full"]
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "127.0.0.1:${JAEGER_UI_PORT:-16686}:16686"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:16686/"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # --------------------------------------------------------------------------
+  # OTLP protobuf bridge — the one component in the box that emits
+  # spec-compliant OTLP protobuf. Vector cannot (its native
+  # `opentelemetry` sink is unusable for traces, per vector.yaml's
+  # gallery note), and every destination here wants protobuf: Cribl's
+  # OTel source answers OTLP/JSON with a 501, and Splunk
+  # Observability's /v2/trace/otlp documents
+  # `Content-Type: application/x-protobuf`. So an overlay's trace sink
+  # posts wire-shaped JSON to this stock Collector, which re-exports
+  # protobuf with the destination's own auth header.
+  #
+  # WHICH config it loads is the overlay selector (blueprint S7a),
+  # expanded by compose in the command below:
+  #   LIBRERUN_OBS_VENDOR=datadog  -> config/otel-bridge-datadog.yaml
+  #   LIBRERUN_OBS_VENDOR=elastic  -> config/otel-bridge-elastic.yaml
+  #   LIBRERUN_OBS_VENDOR=splunk   -> config/otel-bridge-splunk.yaml
+  #   unset (the Cribl overlay)    -> config/otel-bridge.yaml
+  # An unknown value names a file that is not mounted, so the bridge
+  # refuses to start and says which file it wanted — nothing is
+  # forwarded on a guess.
+  #
+  # Enable with BOTH knobs (the profiles below are the only ones that
+  # start it — it cannot start without an exporter endpoint, and
+  # `full` must stay startable with nothing configured):
+  #   1. LIBRERUN_OBS_VENDOR=<vendor> in .env (+ the values in
+  #      observability.env), or VECTOR_CRIBL=1 + CRIBL_* for Cribl
+  #   2. ./compose.sh --profile obs up -d     (Cribl: --profile cribl)
+  # No published ports — the only listener lives on the compose network.
+  # --------------------------------------------------------------------------
+  otel-bridge:
+    image: docker.io/otel/opentelemetry-collector:0.159.0@sha256:7725a7a10c87d8853208bdd4bb3439ad3c0d7b32b4292b9300ac07c8daba14a2
+    container_name: librerun-otel-bridge
+    # `cribl` kept so the Cribl recipe is unchanged; `obs` added for the
+    # vendor overlays (blueprint S7a). Deliberately not in `full`: the
+    # bridge cannot start without an exporter endpoint (the collector
+    # rejects an empty one and would crash-loop), and `full` must stay
+    # startable with nothing configured.
+    profiles: ["cribl", "obs"]
+    # No shell: the collector image ships the binary and nothing else,
+    # so the selector is interpolated by compose into the argument
+    # itself. `:+` supplies the separating hyphen only when a vendor is
+    # named, which leaves the bare Cribl filename when it is not.
+    command: ["--config=/etc/otelcol/otel-bridge${LIBRERUN_OBS_VENDOR:+-}${LIBRERUN_OBS_VENDOR:-}.yaml"]
+    # No `environment:` block at all, and that is deliberate (K4): every
+    # value this collector reads — the Cribl OTLP pair and each vendor's
+    # trace endpoint and credential — comes from the file below. A name
+    # that appears in `environment:` beats the same name in an
+    # `env_file`, so an empty default here would silently win over
+    # observability-traces.env. The selector in the command above is
+    # expanded by compose at parse time and is not read by the
+    # container, so it needs no pass-through.
+    #
+    # The TRACE leg's endpoints and credentials (blueprint S7a),
+    # optional: an unselected stack reads none of them and starts
+    # without the file. Its own file, not the one `vector` loads — L28
+    # says no process receives a secret it does not read, and one shared
+    # file would hand this container the HEC token it never uses and
+    # Vector the Splunk Observability token it never uses. Gate P
+    # (backend/tests/test_secret_partition.py) is what keeps that true.
+    env_file:
+      - path: ./observability-traces.env
+        required: false
+    volumes:
+      - ./config/otel-bridge.yaml:/etc/otelcol/otel-bridge.yaml:ro,Z
+      # One per vendor (blueprint S7a) — each a complete collector
+      # config, so the command above selects rather than merges.
+      - ./config/otel-bridge-datadog.yaml:/etc/otelcol/otel-bridge-datadog.yaml:ro,Z
+      - ./config/otel-bridge-elastic.yaml:/etc/otelcol/otel-bridge-elastic.yaml:ro,Z
+      - ./config/otel-bridge-splunk.yaml:/etc/otelcol/otel-bridge-splunk.yaml:ro,Z
+    restart: unless-stopped
+
+  # --------------------------------------------------------------------------
+  # Backend — FastAPI
+  # --------------------------------------------------------------------------
+  backend:
+    # Built from this checkout, never pulled (A2, #133; L37, D26): a
+    # release is source only, so no registry holds these images, and
+    # `pull_policy: build` has compose build every service that has a
+    # `build:` on `up` — from cache when nothing changed — rather than ask
+    # a registry. The default name, `localhost/librerun/…`, keeps Podman off
+    # every registry but the loopback address: podman-compose hands `up
+    # --no-build`'s missing image to `podman create`, whose own default
+    # pulls it, and a local name leaves it nowhere else to ask.
+    # LIBRERUN_IMAGE_PREFIX and LIBRERUN_IMAGE_TAG name the local build
+    # (`dev`), or a registry of the operator's own to push to — compose
+    # still builds them here.
+    image: ${LIBRERUN_IMAGE_PREFIX:-localhost/librerun}/librerun-backend:${LIBRERUN_IMAGE_TAG:-dev}
+    pull_policy: build
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: librerun-backend
+    profiles: ["app", "full"]
+    # Start THIS deployment's container as root so the entrypoint can
+    # chown the ./data/logs bind mount before dropping to 'librerun' (the
+    # image itself defaults to USER librerun, so any command override —
+    # docker run, a Kubernetes `command:` — stays unprivileged).
+    # Remove this override and the backend still runs as 'librerun', but
+    # the log-dir self-heal is skipped: a root-owned bind mount then
+    # degrades to stderr-only logging with a log_file_unwritable
+    # warning.
+    user: "0:0"
+    # Beside its default network, the internal ``agents`` network: the
+    # one place a container agent can reach (Run Contract, MCP, the OTLP
+    # relay) — blueprint S4. And the ``edge`` network, where the HTTPS
+    # edge reaches it (T1); no agent is on that one.
+    networks:
+      - default
+      - agents
+      - edge
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      APP_PORT: "8000"
+      APP_HOST: "0.0.0.0"
+      APP_SECRET_KEY: ${APP_SECRET_KEY:-dev-secret-change-me}
+      APP_CORS_ORIGINS: ${APP_CORS_ORIGINS:-http://localhost:3000}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-librerun}:${POSTGRES_PASSWORD:-librerun_dev_pw}@postgres:5432/${POSTGRES_DB:-librerun}
+      REDIS_URL: redis://redis:6379/0
+      # Agents directory override (blueprint B12). Empty = the image's
+      # baked-in /app/agents (the demo default — the bundled demo agent
+      # ships in the image). To develop an agent against a running
+      # stack, bind-mount it and point this at the mount.
+      LIBRERUN_AGENTS_PATH: ${LIBRERUN_AGENTS_PATH:-}
+      # Where agents keep file-shaped state only, never configuration:
+      # an agent's settings are data in the database since K5b (L32). A
+      # named volume (blueprint S2, gap H5), so what is kept there
+      # survives `up -d --force-recreate`.
+      LIBRERUN_STATE_DIR: /app/data/state
+      # Container agents (Run Contract v1, blueprint B12a): a manifest's
+      # container.url may reference env vars like these — the three
+      # example containers' services live in agents.compose.yaml (demo
+      # profile). Each default names its own service; a deployment that
+      # does not scan backend/agents/_examples never reads the manifests
+      # that use them.
+      ECHO_AGENT_URL: ${ECHO_AGENT_URL:-http://echo-agent:8090}
+      LLAMAINDEX_AGENT_URL: ${LLAMAINDEX_AGENT_URL:-http://llamaindex-agent:8090}
+      VERCEL_AGENT_URL: ${VERCEL_AGENT_URL:-http://vercel-agent:8090}
+      # Where agent CONTAINERS reach this chassis (blueprint B13) — it is
+      # advertised to them as run.mcp.url for the run-scoped capability
+      # tools. The default MUST be container-routable: an agent following
+      # a localhost URL would call ITSELF, not the chassis. On the compose
+      # network the backend service name is the right answer; override
+      # only when agents run outside this network.
+      LIBRERUN_PUBLIC_URL: ${LIBRERUN_PUBLIC_URL:-http://backend:8000}
+      # Where the source of the running version is (K blueprint A1, R17;
+      # AGPL-3.0 section 13), served by /api/v1/meta. Blank means the
+      # default, which the backend derives from the running version's tag,
+      # so neither the URL nor a version is written here.
+      LIBRERUN_SOURCE_URL: ${LIBRERUN_SOURCE_URL:-}
+      # Ceiling on one phase invocation's wall-clock budget (blueprint S4):
+      # a manifest's phases[].deadline_seconds applies under it, and a
+      # phase that declares none gets exactly this.
+      LIBRERUN_MAX_PHASE_SECONDS: ${LIBRERUN_MAX_PHASE_SECONDS:-3600}
+      # Demo mode (blueprint S3): scripts/demo.sh writes LIBRERUN_DEMO=true.
+      # The only mode that accepts the default APP_SECRET_KEY above.
+      LIBRERUN_DEMO: ${LIBRERUN_DEMO:-false}
+      # Where model calls go (blueprint S4a). No provider key is in this
+      # block any more, and none should be: this process is shared by
+      # every python-package agent, so a credential here is a credential
+      # all of them can read. LIBRERUN_STUB_LLM moved with them — keyless
+      # mode is the gateway's to decide, and /api/v1/meta asks it.
+      LIBRERUN_GATEWAY_URL: ${LIBRERUN_GATEWAY_URL:-http://gateway:8090}
+      # The platform's embedding step, again — the SAME value the gateway
+      # gets, and not a secret. The gateway ENFORCES it; the backend only
+      # needs to be able to say what it is, because `kb.embed_model`
+      # defaults to this variable and the settings page reports that
+      # default. Passed to one service and not the other, the admin page
+      # showed the built-in model while the gateway routed the
+      # environment's (Codex P2).
+      LIBRERUN_KB_EMBED_MODEL: ${LIBRERUN_KB_EMBED_MODEL:-openai/text-embedding-3-small}
+      # An in-process agent's THIRD-PARTY TOOL secret (L20), as the
+      # fallback of the one it declares (K8a): the secrets capability reads
+      # it from this process's environment while neither a tenant's value
+      # nor every tenant's default is set.
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+      PINECONE_API_KEY: ${PINECONE_API_KEY:-}
+      PINECONE_ENVIRONMENT: ${PINECONE_ENVIRONMENT:-}
+      PINECONE_INDEX_NAME: ${PINECONE_INDEX_NAME:-librerun-kb}
+      # Vendor-neutral OTEL trace export — defaults to the bundled Vector
+      # router (decision L3) when the variable is UNSET. The dash form
+      # (no colon) preserves an explicitly empty value, so uncommenting
+      # OTEL_EXPORTER_OTLP_ENDPOINT= in .env genuinely disables export —
+      # with :- an operator's blank opt-out would silently fall back to
+      # Vector and keep shipping spans (incl. captured LLM content).
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT-http://vector:4317}
+      OTEL_EXPORTER_OTLP_PROTOCOL: ${OTEL_EXPORTER_OTLP_PROTOCOL:-grpc}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-librerun-backend}
+      OTEL_DEBUG: ${OTEL_DEBUG:-false}
+      # GenAI content capture (run-plane spans/events carry LLM prompt/
+      # completion text by default). Blank falls through to the backend's
+      # default (SPAN_AND_EVENT); set NO_CONTENT in .env to opt out — see
+      # docs/authoring/Agents_Design.md "Observability contract".
+      OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: ${OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT:-}
+      # Which tenant's admins are the PLATFORM operators (settings gate,
+      # bootstrap target, credentials login). Schema seeds slug 'dev'.
+      PLATFORM_TENANT_SLUG: ${PLATFORM_TENANT_SLUG:-dev}
+      # Browser (UX-plane) telemetry relay — docs/platform/Browser_Observability.md.
+      # Emission rides OTEL_EXPORTER_OTLP_ENDPOINT above; ENABLED=false is
+      # the runtime kill switch (browsers get 410 and stop, no rebuild).
+      UX_TELEMETRY_ENABLED: ${UX_TELEMETRY_ENABLED:-true}
+      UX_TELEMETRY_USER_UNITS_PER_MINUTE: ${UX_TELEMETRY_USER_UNITS_PER_MINUTE:-600}
+      UX_TELEMETRY_TENANT_UNITS_PER_MINUTE: ${UX_TELEMETRY_TENANT_UNITS_PER_MINUTE:-6000}
+      UX_TELEMETRY_GLOBAL_UNITS_PER_MINUTE: ${UX_TELEMETRY_GLOBAL_UNITS_PER_MINUTE:-60000}
+      # Pluggable trace viewer (blueprint B5, L8): preset + base URL for
+      # the "View trace" deep links. The base URL is opened by the
+      # OPERATOR'S BROWSER, hence localhost, not a compose service name.
+      TRACE_VIEWER: ${TRACE_VIEWER:-off}
+      TRACE_VIEWER_BASE_URL: ${TRACE_VIEWER_BASE_URL:-http://localhost:16686}
+      TRACE_VIEWER_URL_TEMPLATE: ${TRACE_VIEWER_URL_TEMPLATE:-}
+      # Which vendor overlay Vector and the bridge were started with
+      # (blueprint S7a) — reported by /admin/otel-status so an operator
+      # can see where telemetry is going from inside the chassis. The
+      # backend NEVER holds the vendor's credentials: this is the name
+      # alone, and observability.env is mounted on vector and
+      # otel-bridge only.
+      LIBRERUN_OBS_VENDOR: ${LIBRERUN_OBS_VENDOR:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+      LOG_FILE_PATH: ${LOG_FILE_PATH:-/app/data/logs/backend.jsonl}
+      LOG_FILE_ROTATION_WHEN: ${LOG_FILE_ROTATION_WHEN:-midnight}
+      LOG_FILE_BACKUP_COUNT: ${LOG_FILE_BACKUP_COUNT:-14}
+      LOG_REDACT_PII: ${LOG_REDACT_PII:-true}
+      LOG_QUEUE_ONLY: ${LOG_QUEUE_ONLY:-true}
+      LOG_STDERR_ENABLED: ${LOG_STDERR_ENABLED:-true}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      AZURE_CLIENT_ID: ${AZURE_CLIENT_ID:-}
+      AZURE_CLIENT_SECRET: ${AZURE_CLIENT_SECRET:-}
+      AZURE_TENANT_ID: ${AZURE_TENANT_ID:-}
+      # The encrypted secrets store's key (K6, D33): the backend's alone,
+      # handed to no other service (L28). Blank = unconfigured: a secret
+      # set in Admin -> Settings answers 503 and the environment applies.
+      LIBRERUN_BACKEND_SECRETS_KEY: ${LIBRERUN_BACKEND_SECRETS_KEY:-}
+      CREDENTIALS_ENABLED: ${CREDENTIALS_ENABLED:-true}
+      JWT_EXPIRY_HOURS: ${JWT_EXPIRY_HOURS:-24}
+      BCRYPT_ROUNDS: ${BCRYPT_ROUNDS:-12}
+      # Initial users seeded by app.scripts.bootstrap_admin on every boot.
+      # Either pair blank => skipped. .env is the source of truth (script
+      # overwrites the password hash on each start), so rotating is an
+      # .env edit + container restart.
+      INITIAL_ADMIN_EMAIL: ${INITIAL_ADMIN_EMAIL:-}
+      INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:-}
+      INITIAL_USER_EMAIL: ${INITIAL_USER_EMAIL:-}
+      INITIAL_USER_PASSWORD: ${INITIAL_USER_PASSWORD:-}
+      PII_CONFIDENCE_THRESHOLD: ${PII_CONFIDENCE_THRESHOLD:-0.7}
+      # The region the walker's number rule parses a bare number as a
+      # national phone number of (blueprint S4): ISO 3166-1 alpha-2.
+      PII_PHONE_REGION: ${PII_PHONE_REGION:-US}
+      # Blueprint S4c: the operator's opt-out from failing closed when
+      # the named-entity stage cannot run. The gateway's block carries
+      # it too — see there for why one policy has to reach both.
+      LIBRERUN_PII_ALLOW_DEGRADED: ${LIBRERUN_PII_ALLOW_DEGRADED:-false}
+      # Whose X-Forwarded-For and X-Forwarded-Proto uvicorn believes
+      # (`--proxy-headers` in the entrypoint; K blueprint T1, D37): the HTTPS
+      # edge's fixed address on the ``edge`` network, and nothing else. Every
+      # audit and session row records the client address it yields. Never
+      # `*`: agent containers share the ``agents`` network with this process
+      # and could forge the headers. Not an .env line of its own: it is the
+      # edge's address, from LIBRERUN_EDGE_NET like the network above; with
+      # the `tls` profile off nothing connects from it.
+      FORWARDED_ALLOW_IPS: "${LIBRERUN_EDGE_NET:-172.16.87}.2"
+    ports:
+      # Loopback by default (T1): a fresh install publishes plain HTTP to
+      # this host alone. Other machines reach LibreRun through the HTTPS
+      # edge (`--profile tls`), or through an explicit 0.0.0.0:8000 line in
+      # .env, which is plain HTTP on every interface — and compose.sh
+      # refuses that line while the `tls` profile is requested, because
+      # Docker's publishing bypasses ufw and firewalld.
+      - "${BACKEND_PORT:-127.0.0.1:8000}:8000"
+    volumes:
+      - file-storage:/app/data/files
+      # Agent-owned file-shaped state (LIBRERUN_STATE_DIR above) — never
+      # configuration, which is data in the database since K5b.
+      - state:/app/data/state
+      # Bind mount (not a named volume): a host-side Cribl Edge agent tails
+      # these files. Point the agent at ./data/logs/*.jsonl on the host.
+      # Ownership self-heals: `user: "0:0"` above starts the container
+      # as root, and the entrypoint chowns this mount recursively to
+      # 'librerun' before dropping privileges (Docker creates missing bind
+      # dirs root-owned). No Podman ':U' flag here on purpose: with a
+      # root-starting container, ':U' would recursively re-chown the
+      # mount — existing log files included — to ROOT on every
+      # container recreation, undoing the self-heal it predated. If the
+      # root start is removed, the backend falls back to stderr-only
+      # logging with a ``log_file_unwritable`` warning naming the
+      # manual chown fix.
+      - ./data/logs:/app/data/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      # started, not healthy: observability must never block the app; the
+      # OTLP exporter retries until Vector is up.
+      vector:
+        condition: service_started
+      # started, not healthy: a run that reaches a model before the
+      # gateway is up fails that phase with a named error, which beats
+      # holding the whole API closed behind it.
+      gateway:
+        condition: service_started
+    # The engine's own readiness signal: `compose ps` shows "(healthy)"
+    # once the API answers, which scripts/demo.sh reads on a host with no
+    # curl, wget or python3 of its own. The image is python:slim — no wget
+    # or curl inside — so the probe is python. Nothing depends on this
+    # condition: the frontend and observability start regardless.
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 90s
+    restart: unless-stopped
+
+  # --------------------------------------------------------------------------
+  # Frontend — Next.js
+  # --------------------------------------------------------------------------
+  frontend:
+    image: ${LIBRERUN_IMAGE_PREFIX:-localhost/librerun}/librerun-web:${LIBRERUN_IMAGE_TAG:-dev}
+    pull_policy: build
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      # Build args, NOT runtime env: Next.js inlines NEXT_PUBLIC_* values into
+      # the client bundle during ``npm run build``. Setting it only under
+      # ``environment:`` is too late — by then the bundle is already baked
+      # with the fallback ("http://localhost:8000/api/v1") and the visitor's
+      # browser would fetch from their own laptop.
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000/api/v1}
+        # Also a build arg, for the same reason: next.config.js's rewrite of
+        # /api/v1/* to this URL is computed by ``npm run build`` and baked
+        # into the image's routes manifest, so a value that reaches the
+        # server only at run time proxies nothing — measured (K blueprint
+        # §11, T1): built without it, /api/v1/health through the web UI was
+        # a 404 whatever the container's environment held. Blank (the
+        # default) builds no rewrite, as before.
+        BACKEND_INTERNAL_URL: ${BACKEND_INTERNAL_URL:-}
+    container_name: librerun-frontend
+    profiles: ["app", "full"]
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000/api/v1}
+      # Optional: when set, the Next.js server proxies ``/api/v1/*`` to this
+      # URL through the rewrite ``npm run build`` baked in from the build arg
+      # above; this run-time copy alone proxies nothing (T1). Pair with
+      # NEXT_PUBLIC_API_URL=/api/v1 so the bundle uses a relative path and the
+      # backend stays off the public network. Typical values:
+      #   http://backend:8000             — compose service DNS (simplest)
+      #   http://host.containers.internal:8000  — the host, from the container
+      BACKEND_INTERNAL_URL: ${BACKEND_INTERNAL_URL:-}
+    # The default network, and the ``edge`` network the HTTPS edge reaches
+    # it on (T1).
+    networks:
+      - default
+      - edge
+    ports:
+      # Loopback by default, like the backend's (T1): see there.
+      - "${FRONTEND_PORT:-127.0.0.1:3000}:3000"
+    # Make ``host.containers.internal`` resolvable from inside the frontend
+    # container. Newer Podman provides this automatically; the explicit
+    # mapping is harmless on those versions and required on older Podman /
+    # Docker. If you'd rather route over the compose network, leave
+    # BACKEND_INTERNAL_URL=http://backend:8000 and ignore this entry.
+    extra_hosts:
+      - "host.containers.internal:host-gateway"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  # --------------------------------------------------------------------------
+  # The HTTPS edge — Caddy (K blueprint T1; decisions L35, D37). Opt-in:
+  #
+  #   ./compose.sh --profile app --profile tls up -d --build
+  #
+  # terminates TLS on one published port and hands /api/v1/* to the backend
+  # and everything else to the web UI (config/Caddyfile), and the four
+  # certificate changes made on Application Settings to `edge-control`
+  # below (T2). compose.sh refuses
+  # the profile unless BACKEND_PORT and FRONTEND_PORT stay on loopback,
+  # NEXT_PUBLIC_API_URL is /api/v1 and BACKEND_INTERNAL_URL is
+  # http://backend:8000 — no override file can remove a publish, so the
+  # binding itself is the guard. The keyless demo never starts it: it stays
+  # plain HTTP on localhost (D1, L35). docs/platform/Install.md, "HTTPS at
+  # the edge".
+  # --------------------------------------------------------------------------
+  edge:
+    # Pinned by version and digest (D25, D37), resolved from the registry on
+    # 2026-09-28; THIRD_PARTY.md carries the same string.
+    image: docker.io/library/caddy:2.11.4@sha256:0c994536bddb66445885237f1a5dcc1916bccea922661c76b4e9fc24061f9b52
+    container_name: librerun-edge
+    profiles: ["tls"]
+    environment:
+      # What the Caddyfile substitutes before it parses: the certificate's
+      # source (`internal`, an ACME e-mail, or `/certs/<cert> /certs/<key>`)
+      # and the site's name. Read by this service alone.
+      LIBRERUN_TLS: ${LIBRERUN_TLS:-internal}
+      LIBRERUN_TLS_DOMAIN: ${LIBRERUN_TLS_DOMAIN:-localhost}
+      # A CA of the operator's own, `/certs/<ca.crt> /certs/<ca.key>`, which
+      # config/edge-start.sh names in the pki block at every start: the
+      # environment's way to keep one root across a restore (T2, L42).
+      # Blank keeps the root the edge generated. Read by this service alone.
+      LIBRERUN_TLS_CA: ${LIBRERUN_TLS_CA:-}
+    # Every start goes through the wrapper, which writes what the
+    # environment says into the control volume and then runs the image's
+    # own command. `sh` reads it, so it needs no execute bit.
+    command: ["/bin/sh", "/etc/caddy/edge-start.sh"]
+    # The ``edge`` network alone, at its fixed address: podman-compose
+    # cannot pin a static address on a container that joins several
+    # networks (containers/podman-compose#1299), and the backend's
+    # FORWARDED_ALLOW_IPS names this address.
+    networks:
+      edge:
+        ipv4_address: "${LIBRERUN_EDGE_NET:-172.16.87}.2"
+    ports:
+      # The one port published off loopback while the profile is on.
+      # 8443 inside, so rootless Podman starts it without a sysctl; 443 on
+      # the host is LIBRERUN_HTTPS_PORT=443 (Install.md, per engine).
+      - "${LIBRERUN_HTTPS_PORT:-8443}:8443"
+    volumes:
+      # The image's own command reads this path. `z`, not `Z`: edge-control
+      # mounts the same file to post it to the admin socket, and a private
+      # label would lock one of the two out.
+      - ./config/Caddyfile:/etc/caddy/Caddyfile:ro,z
+      - ./config/edge-start.sh:/etc/caddy/edge-start.sh:ro,Z
+      # The operator's certificate and key, for LIBRERUN_TLS=/certs/… —
+      # a directory LibreRun alone reads (`Z` relabels it for this
+      # container). The default ./tls ships empty and git-ignored.
+      - ${LIBRERUN_TLS_CERT_DIR:-./tls}:/certs:ro,Z
+      # Caddy's data directory: the local CA (its root key included) and
+      # ACME's account and certificates. `down -v` deletes it, and with it
+      # the root every browser was told to trust.
+      - librerun-edge-data:/data
+      # The control volume (T2, D44 refined): Caddy's admin socket — never
+      # on TCP — the snippets the Caddyfile imports, the certificate files
+      # a platform admin loads, and the record of that choice. The edge and
+      # edge-control alone mount it: never the backend, the web UI or an
+      # agent, since an in-process agent runs in the backend's process.
+      - librerun-edge-control:/control
+    depends_on:
+      - backend
+      - frontend
+    restart: unless-stopped
+
+  # --------------------------------------------------------------------------
+  # The edge's control (K blueprint T2; decisions L42, L43, D44 refined).
+  # The backend's image in a container of its own, under the `tls` profile:
+  # `python -m app.edge_control` holds the edge's admin socket and the files
+  # a platform admin uploads on Application Settings, and it alone posts
+  # the Caddyfile back to the socket after a change. No database URL, no
+  # secret and no agent: the control volume and the Caddyfile alone. It
+  # takes a change from the edge's own address alone — the edge sends one
+  # only after forward_auth has asked the backend whether the caller is a
+  # platform admin, with the request's headers and never its body — and
+  # answers the backend's GET /status with public material alone.
+  # --------------------------------------------------------------------------
+  edge-control:
+    image: ${LIBRERUN_IMAGE_PREFIX:-localhost/librerun}/librerun-backend:${LIBRERUN_IMAGE_TAG:-dev}
+    pull_policy: build
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: librerun-edge-control
+    profiles: ["tls"]
+    # Started as root so the backend image's entrypoint gives the control
+    # volume to `librerun`, as the backend's own volumes are given, and then
+    # drops to it before this command runs.
+    user: "0:0"
+    command: ["python", "-m", "app.edge_control"]
+    environment:
+      # The one address a certificate change is taken from: the edge's, as
+      # the backend's FORWARDED_ALLOW_IPS names it, from LIBRERUN_EDGE_NET.
+      EDGE_ADDRESS: "${LIBRERUN_EDGE_NET:-172.16.87}.2"
+    # The `edge` network alone: the edge reaches it there, and the backend
+    # reads its status there. No agent is on that network.
+    networks:
+      - edge
+    volumes:
+      - librerun-edge-control:/control
+      - ./config/Caddyfile:/etc/caddy/Caddyfile:ro,z
+    restart: unless-stopped
+
+  # Container agents: agents.compose.yaml (included above) — the reference
+  # echo agent under the demo profile, on the internal ``agents`` network.
+
+volumes:
+  # `name:` is the volume's actual name (no project prefix), and each is
+  # env-parameterised so a deployment created before blueprint S2 keeps
+  # its data by pinning the old name in .env (see `docker volume ls`) —
+  # docs/platform/Install.md, "Upgrading an existing deployment".
+  pgdata:
+    name: ${LIBRERUN_PGDATA_VOLUME:-librerun-pgdata}
+  redis-data:
+    name: ${LIBRERUN_REDIS_VOLUME:-librerun-redis-data}
+  file-storage:
+    name: ${LIBRERUN_FILES_VOLUME:-librerun-file-storage}
+  state:
+    name: ${LIBRERUN_STATE_VOLUME:-librerun-state}
+  librerun-vector-data:
+  # The edge's local CA and certificates (T1). Project-scoped like
+  # librerun-vector-data: two clones with one directory name are one
+  # compose project and share it.
+  librerun-edge-data:
+  # The edge's control volume (T2): its admin socket, and the certificates
+  # and keys loaded on Application Settings. The edge's and edge-control's
+  # alone, and like librerun-edge-data in no backup (L42).
+  librerun-edge-control:

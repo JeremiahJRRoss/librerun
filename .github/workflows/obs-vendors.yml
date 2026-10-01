@@ -1,0 +1,768 @@
+# The observability vendor overlays (blueprint S7a, decision L26 —
+# promise 3: your telemetry, in the tool you already use).
+#
+# Two jobs, and the second is the one that matters:
+#
+#   validate  — every overlay is a config Vector accepts, and a
+#               deliberately broken one is not. Cheap, no stack.
+#   contract  — the stack, a keyless demo run per vendor, and the bytes
+#               a mock intake actually received, decoded. Both legs, per
+#               vendor, plus the baseline: with no overlay selected
+#               nothing is forwarded and the bundled Jaeger viewer works
+#               exactly as it does today.
+#
+# WHAT THE MOCKS PROVE: the wire shape LibreRun emits is the one each
+# vendor documents. They are NOT a vendor's acceptance of the data —
+# only an account at that vendor can tell you that. Said again in
+# docs/platform/Observability.md, because a green tick here is easy to
+# over-read.
+name: obs-vendors
+
+on:
+  push:
+    branches: [main]
+    paths:
+      # The overlays and the bridge configs themselves.
+      - "config/**"
+      # The selector, the profiles, the mounts, the env_file.
+      - "compose.yaml"
+      - "compose.sh"
+      - "agents.compose.yaml"
+      - "observability.env.example"
+      - "observability-traces.env.example"
+      # The mock, the checker and the per-vendor driver this job stands
+      # on. A PR that weakens any of them must run the job it weakens.
+      - "scripts/obs_*"
+      # The demo path the contract test boots and drives.
+      - "scripts/demo.sh"
+      # ...and the file demo.sh READS. S9 made the image tag come
+      # from VERSION, so a commit changing only VERSION changes what
+      # this job pulls while skipping the job entirely. Found by the
+      # derived reach rule in `backend/tests/test_adapter_kit.py`,
+      # which follows a workflow into the scripts it runs, the day
+      # S9 landed rather than the day someone noticed.
+      - "VERSION"
+      - "scripts/librerun_smoke.py"
+      # The walkers, the relay and the exporters: this job re-asserts
+      # S4's raw-instrumentation fixture at each vendor's wire, so a
+      # change to what walks telemetry changes what this job proves.
+      # `backend/app/**` rather than an enumeration — the import closure
+      # of the relay reaches config, models and the boundary walker, and
+      # a subset always eventually misses one.
+      - "backend/app/**"
+      - "backend/requirements.txt"
+      - "backend/requirements.lock.txt"
+      # The agent whose OWN instrumentation carries the fixture.
+      - "backend/agents/_examples/echo_container/**"
+      # The package the example lives in: the job imports
+      # `backend.agents`, so this file is one it RUNS. It is empty
+      # today, which is exactly why it is easy to miss — the day it
+      # gains agent-discovery code, a pull request changing only it
+      # would skip this job. Found by
+      # test_no_workflow_runs_a_file_its_own_paths_filter_cannot_see
+      # (H14, #62) on the merge that brought S7a in, not by review.
+      - "backend/agents/__init__.py"
+      - "sdk/**"
+      # The health wait the K4 job runs. A shared script outside its own
+      # trigger's reach is the defect `unit-suites` documents at length;
+      # the derived guard in backend/tests/test_adapter_kit.py demands
+      # this line rather than trusting anyone to remember it.
+      - ".github/scripts/**"
+      - ".github/workflows/obs-vendors.yml"
+  pull_request:
+    paths:
+      # The overlays and the bridge configs themselves.
+      - "config/**"
+      # The selector, the profiles, the mounts, the env_file.
+      - "compose.yaml"
+      - "compose.sh"
+      - "agents.compose.yaml"
+      - "observability.env.example"
+      - "observability-traces.env.example"
+      # The mock, the checker and the per-vendor driver this job stands
+      # on. A PR that weakens any of them must run the job it weakens.
+      - "scripts/obs_*"
+      # The demo path the contract test boots and drives.
+      - "scripts/demo.sh"
+      # ...and the file demo.sh READS. S9 made the image tag come
+      # from VERSION, so a commit changing only VERSION changes what
+      # this job pulls while skipping the job entirely. Found by the
+      # derived reach rule in `backend/tests/test_adapter_kit.py`,
+      # which follows a workflow into the scripts it runs, the day
+      # S9 landed rather than the day someone noticed.
+      - "VERSION"
+      - "scripts/librerun_smoke.py"
+      # The walkers, the relay and the exporters: this job re-asserts
+      # S4's raw-instrumentation fixture at each vendor's wire, so a
+      # change to what walks telemetry changes what this job proves.
+      # `backend/app/**` rather than an enumeration — the import closure
+      # of the relay reaches config, models and the boundary walker, and
+      # a subset always eventually misses one.
+      - "backend/app/**"
+      - "backend/requirements.txt"
+      - "backend/requirements.lock.txt"
+      # The agent whose OWN instrumentation carries the fixture.
+      - "backend/agents/_examples/echo_container/**"
+      # The package the example lives in: the job imports
+      # `backend.agents`, so this file is one it RUNS. It is empty
+      # today, which is exactly why it is easy to miss — the day it
+      # gains agent-discovery code, a pull request changing only it
+      # would skip this job. Found by
+      # test_no_workflow_runs_a_file_its_own_paths_filter_cannot_see
+      # (H14, #62) on the merge that brought S7a in, not by review.
+      - "backend/agents/__init__.py"
+      - "sdk/**"
+      # The health wait the K4 job runs. A shared script outside its own
+      # trigger's reach is the defect `unit-suites` documents at length;
+      # the derived guard in backend/tests/test_adapter_kit.py demands
+      # this line rather than trusting anyone to remember it.
+      - ".github/scripts/**"
+      - ".github/workflows/obs-vendors.yml"
+
+# One run per ref: these boot containers, so queueing beats piling up.
+concurrency:
+  group: obs-vendors-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  VECTOR_IMAGE: docker.io/timberio/vector:0.50.0-alpine@sha256:93761c26fa3a3793f5f200de0f4cfc6102b5e9803ab33b4830d0873ba8dbdc4f
+  # The mock intake the vendors ship to, and the probe that waits for it.
+  # Named here, pinned by digest like every image (R14), and run by
+  # variable: a `docker run` in a workflow never names an image itself.
+  MOCK_IMAGE: docker.io/library/python:3.12-slim@sha256:f77ac9e44ae96ef2c90b8053ea08c31f8be030f824196b0ae4db6d462c84e51f
+  CURL_IMAGE: docker.io/curlimages/curl:8.10.1@sha256:d9b4541e214bcd85196d6e92e2753ac6d0ea699f0af5741f8c6cccbfcf00ef4b
+  # The S4 raw-instrumentation fixture: the address the reference echo
+  # agent emits through its OWN span attributes, link attributes, span
+  # events and log records when `fetch_and_emit` is set. It must be on
+  # neither leg at any vendor — the overlays forward and never redact,
+  # because both planes reach Vector already walked.
+  OBS_FIXTURE: pii.fixture@example.com
+
+jobs:
+  # ==========================================================================
+  # 1. Every overlay is a config Vector accepts — and a broken one is not.
+  # ==========================================================================
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      # Placeholder values for every variable the overlays read. This
+      # step checks the SHAPE of a config, which is what `validate`
+      # means; whether a real endpoint answers is the contract job's
+      # business, and an operator who selects an overlay with nothing
+      # configured gets Vector's own loud start-up failure (that is the
+      # documented behaviour of the empty defaults, not a bug this job
+      # should paper over).
+      - name: Placeholder vendor settings
+        run: |
+          set -euo pipefail
+          cat >> "$GITHUB_ENV" <<'ENVV'
+          DATADOG_API_KEY=placeholder
+          DATADOG_LOGS_ENDPOINT=https://http-intake.logs.datadoghq.com
+          ELASTIC_URL=https://elastic.example:9243
+          ELASTIC_API_KEY=placeholder
+          SPLUNK_HEC_URL=https://hec.example:8088
+          SPLUNK_HEC_TOKEN=placeholder
+          ENVV
+
+      - name: Every overlay validates, with the shaping file it needs
+        run: |
+          set -euo pipefail
+          for vendor in datadog elastic splunk; do
+            echo "::group::vector validate — $vendor"
+            docker run --rm \
+              -v "$PWD/config:/etc/vector:ro" \
+              -e DATADOG_API_KEY -e DATADOG_LOGS_ENDPOINT \
+              -e ELASTIC_URL -e ELASTIC_API_KEY \
+              -e SPLUNK_HEC_URL -e SPLUNK_HEC_TOKEN \
+              --entrypoint /usr/local/bin/vector "$VECTOR_IMAGE" \
+              validate --no-environment \
+                /etc/vector/vector.yaml \
+                /etc/vector/vector-otlp-shape.yaml \
+                "/etc/vector/vector-$vendor.yaml"
+            echo "::endgroup::"
+          done
+
+      # The negative case. On a clean tree a working validator and a
+      # `|| true` are indistinguishable, so the gate is driven with the
+      # violation it exists to catch — twice, in the two shapes that
+      # actually happen.
+      - name: A broken overlay FAILS validate (negative case)
+        run: |
+          set -euo pipefail
+          work="$(mktemp -d)"
+          cp config/vector.yaml config/vector-otlp-shape.yaml "$work/"
+
+          expect_failure() {
+            local label="$1" file="$2"
+            echo "::group::negative — $label"
+            if docker run --rm \
+                 -v "$work:/etc/vector:ro" \
+                 -e DATADOG_API_KEY -e DATADOG_LOGS_ENDPOINT \
+                 -e ELASTIC_URL -e ELASTIC_API_KEY \
+                 -e SPLUNK_HEC_URL -e SPLUNK_HEC_TOKEN \
+                 --entrypoint /usr/local/bin/vector "$VECTOR_IMAGE" \
+                 validate --no-environment \
+                   /etc/vector/vector.yaml \
+                   /etc/vector/vector-otlp-shape.yaml \
+                   "/etc/vector/$file"; then
+              echo "::error::$label was ACCEPTED by vector validate — the validate step above proves nothing, because it would pass a broken overlay too"
+              exit 1
+            fi
+            echo "…rejected, as it must be"
+            echo "::endgroup::"
+          }
+
+          # (a) A trace sink wired to a transform that is not there —
+          #     exactly what happens if a vendor overlay is ever loaded
+          #     WITHOUT config/vector-otlp-shape.yaml beside it.
+          sed 's/- obs_otlp_shape/- obs_otlp_shape_missing/' \
+            config/vector-splunk.yaml > "$work/vector-broken-input.yaml"
+          ! diff -q config/vector-splunk.yaml "$work/vector-broken-input.yaml" >/dev/null
+          expect_failure "a trace sink reading a transform that does not exist" \
+            vector-broken-input.yaml
+
+          # (b) A sink option Vector does not know — the shape of a typo
+          #     in a vendor's own settings.
+          sed 's/^    default_api_key:/    defualt_api_key:/' \
+            config/vector-datadog.yaml > "$work/vector-broken-option.yaml"
+          ! diff -q config/vector-datadog.yaml "$work/vector-broken-option.yaml" >/dev/null
+          expect_failure "a misspelled sink option" vector-broken-option.yaml
+
+      # An unsupported selector must not resolve to anything loadable.
+      # Groundcover is the named case (JR, 2026-09-20: not a supported
+      # vendor), refused the same way any typo is — by the file simply
+      # not being there.
+      - name: An unknown LIBRERUN_OBS_VENDOR names no config (negative case)
+        run: |
+          set -euo pipefail
+          for unknown in groundcover newrelic datadogg; do
+            for f in "config/vector-$unknown.yaml" "config/otel-bridge-$unknown.yaml"; do
+              if [ -e "$f" ]; then
+                echo "::error::$f exists — an unsupported vendor must name no loadable config"
+                exit 1
+              fi
+            done
+            echo "LIBRERUN_OBS_VENDOR=$unknown resolves to no config, as it must"
+          done
+          # …and the three supported ones DO, or the check above passes
+          # by the whole directory being empty.
+          for vendor in datadog elastic splunk; do
+            test -e "config/vector-$vendor.yaml"
+            test -e "config/otel-bridge-$vendor.yaml"
+          done
+          echo "the three supported overlays are present"
+
+  # ==========================================================================
+  # 2. The contract: a keyless demo run per vendor, decoded at the mock.
+  # ==========================================================================
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Decoder for the trace leg
+        run: pip install --quiet opentelemetry-proto protobuf
+
+      # The demo path (blueprint S3): exactly what a newcomer runs.
+      # `--env-only` first, because observability.env has to exist
+      # before anything starts. Credentials come back out of .env
+      # through a Python parser — never `source`: bash would evaluate
+      # $(...), backticks and ; in a generated password.
+      - name: Write the demo environment
+        run: |
+          set -euo pipefail
+          test ! -f .env
+          ./scripts/demo.sh --env-only
+          python3 - <<'PY' > creds.env
+          import sys
+          env = {}
+          for raw in open(".env", encoding="utf-8"):
+              line = raw.strip()
+              if not line or line.startswith("#") or "=" not in line:
+                  continue
+              key, value = line.split("=", 1)
+              env[key.strip()] = value.strip().strip('"').strip("'")
+          for key in ("INITIAL_ADMIN_EMAIL", "INITIAL_ADMIN_PASSWORD"):
+              if not env.get(key):
+                  sys.exit(f"the demo .env is missing {key}")
+              print(f"{key}={env[key]}")
+          PY
+          echo "::add-mask::$(grep '^INITIAL_ADMIN_PASSWORD=' creds.env | cut -d= -f2-)"
+          cat creds.env >> "$GITHUB_ENV"
+          rm creds.env
+
+      # Two files, one per process, serving all three iterations: each
+      # overlay reads only its own variables, so the other two vendors'
+      # settings sitting beside them are inert. These are the files an
+      # operator copies from the committed examples — same names, same
+      # `env_file: required: false`, and the same split, because L28
+      # says no process receives a secret it does not read and Gate P
+      # (backend/tests/test_secret_partition.py) enforces it.
+      - name: observability.env + observability-traces.env, at the mock
+        run: |
+          set -euo pipefail
+          test -f observability.env.example
+          test -f observability-traces.env.example
+
+          # The LOG leg — vector reads these and the bridge never sees them.
+          cat > observability.env <<'ENVV'
+          LIBRERUN_OBS_SERVICE_NAME=librerun-backend
+          DATADOG_API_KEY=ci-mock-key
+          DATADOG_LOGS_ENDPOINT=http://librerun-obs-mock:9009
+          ELASTIC_URL=http://librerun-obs-mock:9009
+          ELASTIC_API_KEY=ci-mock-key
+          ELASTIC_AUTH_SCHEME=ApiKey
+          ELASTIC_LOGS_DATASET=librerun
+          ELASTIC_LOGS_NAMESPACE=default
+          SPLUNK_HEC_URL=http://librerun-obs-mock:9009
+          SPLUNK_HEC_TOKEN=ci-mock-token
+          SPLUNK_INDEX=main
+          SPLUNK_SOURCETYPE=librerun
+          ENVV
+
+          # The TRACE leg — the bridge reads these and vector never sees them.
+          cat > observability-traces.env <<'ENVV'
+          DD_AGENT_OTLP_URL=http://librerun-obs-mock:9010/v1/traces
+          ELASTIC_APM_OTLP_URL=http://librerun-obs-mock:9010/v1/traces
+          ELASTIC_APM_API_KEY=ci-mock-key
+          ELASTIC_APM_AUTH_SCHEME=ApiKey
+          SPLUNK_OTLP_URL=http://librerun-obs-mock:9010/v2/trace/otlp
+          SPLUNK_ACCESS_TOKEN=ci-mock-token
+          ENVV
+
+          # What this job is about is the THREE VENDOR OVERLAYS, so the
+          # set it holds the files to is derived from those overlays'
+          # own configs rather than from "everything the example
+          # documents". Each is checked three ways: a variable an
+          # overlay reads must be set here (or the contract test proves
+          # nothing about it), must be documented in the example (or an
+          # operator selecting that vendor would miss it), and nothing
+          # set here may be undocumented or unread (or the file is
+          # padded to satisfy a check).
+          #
+          # K4 moved two more blocks into observability.env.example —
+          # the Cribl overlay, which has its own switch (VECTOR_CRIBL)
+          # and its own profile, and the sink gallery, whose sinks ship
+          # commented out in config/vector.yaml. Neither is exercised
+          # here and writing mock values for them would be padding of
+          # exactly the kind the rule above forbids. They are not
+          # unguarded: the backend suite's env-class gate holds each to
+          # exactly one file under exactly one class, and Gate P holds
+          # each to the one process that reads it. (Named rather than
+          # pathed on purpose — this job does not RUN either of them, and
+          # the dependency census in test_adapter_kit.py reads a path in
+          # a `run:` block as a file this job depends on, which would put
+          # a twenty-minute container job on an unrelated test's filter.)
+          python3 - <<'PY'
+          import pathlib, re, sys
+
+          # example, the file this job writes, and the overlay configs
+          # whose interpolations define what that file must carry.
+          LEGS = [
+              (
+                  "observability.env.example",
+                  "observability.env",
+                  [
+                      "config/vector-otlp-shape.yaml",
+                      "config/vector-datadog.yaml",
+                      "config/vector-elastic.yaml",
+                      "config/vector-splunk.yaml",
+                  ],
+              ),
+              (
+                  "observability-traces.env.example",
+                  "observability-traces.env",
+                  [
+                      "config/otel-bridge-datadog.yaml",
+                      "config/otel-bridge-elastic.yaml",
+                      "config/otel-bridge-splunk.yaml",
+                  ],
+              ),
+          ]
+
+          # `${NAME}` (Vector) and `${env:NAME}` (the Collector).
+          INTERPOLATION = re.compile(r"\$\{(?:env:)?([A-Z][A-Z0-9_]+)")
+
+          def declared(path, pattern):
+              return set(re.findall(pattern, open(path, encoding="utf-8").read(), re.M))
+
+          used_sets, documented_sets = {}, {}
+          for example, real, configs in LEGS:
+              needed = set()
+              for config in configs:
+                  path = pathlib.Path(config)
+                  # A path that does not exist would shrink `needed`
+                  # silently, which is this check passing by not looking.
+                  if not path.is_file():
+                      sys.exit(f"{config} is not in the tree; this check would derive less than it should")
+                  needed |= set(INTERPOLATION.findall(path.read_text(encoding="utf-8")))
+              if not needed:
+                  sys.exit(f"{configs} interpolate nothing — the reader is broken, not the tree")
+
+              documented = declared(example, r"^#\s*([A-Z][A-Z0-9_]+)=")
+              used = declared(real, r"^([A-Z][A-Z0-9_]+)=")
+
+              unset = sorted(needed - used)
+              if unset:
+                  sys.exit(
+                      f"the vendor overlays read {unset}, which {real} never sets "
+                      f"— the contract test would prove nothing about them"
+                  )
+              undocumented = sorted(needed - documented)
+              if undocumented:
+                  sys.exit(
+                      f"the vendor overlays read {undocumented}, which {example} does not "
+                      f"document — an operator selecting that vendor would never set them"
+                  )
+              extra = sorted(used - documented)
+              if extra:
+                  sys.exit(
+                      f"{real} sets {extra}, which {example} does not document "
+                      f"— an operator copying the example would not get them"
+                  )
+              unexercised = sorted(used - needed)
+              if unexercised:
+                  sys.exit(
+                      f"{real} sets {unexercised}, which no vendor overlay reads "
+                      f"— padding this file cannot make the contract test say more"
+                  )
+              used_sets[real], documented_sets[real] = used, documented
+              print(f"{real}: all {len(needed)} vendor variables set and documented")
+
+          # The selector belongs in .env: an env_file cannot deliver it
+          # in time, because compose expands it before either container
+          # exists.
+          for real, used in used_sets.items():
+              if "LIBRERUN_OBS_VENDOR" in used:
+                  sys.exit(f"{real} sets LIBRERUN_OBS_VENDOR; that belongs in .env")
+
+          # And the two files must not overlap — neither in what this
+          # job sets nor in what the examples hand an operator. A name in
+          # both is a secret delivered to a process that does not read
+          # it, which is the whole reason there are two files.
+          for label, sets in (("sets", used_sets), ("documents", documented_sets)):
+              both = sets["observability.env"] & sets["observability-traces.env"]
+              if both:
+                  sys.exit(
+                      f"{sorted(both)}: each file {label} it — one process would "
+                      f"receive a credential it never reads (L28, Gate P)"
+                  )
+          print("the log leg and the trace leg share no variable")
+          PY
+
+      # The stack, built once and reused across the three vendors: only
+      # vector and otel-bridge are recreated per iteration, so the
+      # backend image is built once rather than three times.
+      - name: Boot the stack (app + viewer + demo), no overlay yet
+        run: |
+          set -euo pipefail
+          ./scripts/demo.sh
+          docker compose --profile app --profile viewer --profile demo ps
+          # A crash-looping router is invisible to a run: the backend
+          # serves every request fine with telemetry dead, so everything
+          # below would pass on an empty mock.
+          state="$(docker inspect -f '{{.State.Status}}' librerun-vector)"
+          [ "$state" = "running" ] || {
+            echo "::error::vector is $state before any overlay was selected"
+            docker compose logs --no-color vector | tail -40
+            exit 1
+          }
+
+      - name: Start the mock vendor intake on the compose network
+        run: |
+          set -euo pipefail
+          mkdir -p obs-capture && chmod 777 obs-capture
+          net="$(docker inspect librerun-vector \
+                 --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}' \
+                 | awk '{print $1}')"
+          test -n "$net"
+          echo "compose network: $net"
+          # As the runner's own uid: the journal is truncated between
+          # vendors by a later step, and a root-owned file in a
+          # bind-mounted directory cannot be truncated by this user —
+          # deleting and recreating it is not an option either, because
+          # the mock holds an open descriptor and would keep writing to
+          # the unlinked inode while every check read an empty file.
+          docker run -d --name librerun-obs-mock --network "$net" \
+            --user "$(id -u):$(id -g)" \
+            -v "$PWD/scripts:/scripts:ro" -v "$PWD/obs-capture:/capture" \
+            --workdir /capture \
+            "$MOCK_IMAGE" \
+            python /scripts/obs_mock_intake.py --journal /capture/capture.jsonl
+          # It has to be listening before an overlay points at it, or the
+          # first vendor loses its first batch to a connection refused.
+          for _ in $(seq 1 30); do
+            if docker run --rm --network "$net" "$CURL_IMAGE" \
+                 -sf -o /dev/null http://librerun-obs-mock:9009/ ; then
+              echo "mock intake is up"; break
+            fi
+            sleep 2
+          done
+          docker run --rm --network "$net" "$CURL_IMAGE" \
+            -sf -o /dev/null http://librerun-obs-mock:9010/ \
+            || { echo "::error::the mock trace listener never came up"; docker logs librerun-obs-mock; exit 1; }
+          echo "OBS_NET=$net" >> "$GITHUB_ENV"
+
+      # The run driver, written once and called per vendor: an echo-v1
+      # run with `fetch_and_emit`, which is the ONE demo run that makes
+      # the agent emit the S4 fixture through its own instrumentation —
+      # a custom span attribute, a link attribute, a span event and a
+      # log record — through the authenticated relay. Its trace id and
+      # run number are this run's correlation ids.
+      - name: The demo-run driver
+        run: |
+          set -euo pipefail
+          cat > echo_run.py <<'PY'
+          import json, os, sys, time, urllib.error, urllib.request
+
+          BASE = "http://localhost:8000/api/v1"
+
+          def call(method, path, token=None, body=None):
+              data = json.dumps(body).encode() if body is not None else None
+              req = urllib.request.Request(f"{BASE}{path}", data=data, method=method)
+              req.add_header("Content-Type", "application/json")
+              if token:
+                  req.add_header("Authorization", f"Bearer {token}")
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as r:
+                      return r.status, json.loads(r.read() or b"{}")
+              except urllib.error.HTTPError as e:
+                  return e.code, json.loads(e.read() or b"{}")
+
+          status, body = call("POST", "/auth/login", body={
+              "email": os.environ["INITIAL_ADMIN_EMAIL"],
+              "password": os.environ["INITIAL_ADMIN_PASSWORD"],
+          })
+          assert status == 200, ("login", status, body)
+          token = body["access_token"]
+
+          status, body = call("POST", "/runs?agent_id=echo-v1", token=token, body={
+              "message": "obs vendor contract",
+              "fetch_and_emit": True,
+          })
+          assert status in (200, 201, 202), ("submit", status, body)
+          run_id = body.get("run_id")
+          assert run_id, ("submit returned no run_id", body)
+
+          detail = {}
+          for _ in range(60):
+              status, detail = call("GET", f"/runs/{run_id}", token=token)
+              assert status == 200, ("detail", status, detail)
+              if detail.get("status") in ("complete", "error", "awaiting_approval"):
+                  break
+              time.sleep(2)
+          assert detail.get("status") == "complete", ("not complete", detail)
+
+          fixture = os.environ["OBS_FIXTURE"]
+          assert fixture not in json.dumps(detail), "the run detail serves the address"
+
+          # trace_id is admin-only (operator observability), so it comes
+          # from the admin view — the same door scripts/librerun_smoke.py
+          # uses.
+          status, admin = call("GET", f"/admin/runs/{run_id}", token=token)
+          assert status == 200, ("admin detail", status, admin)
+          trace_id = admin.get("trace_id") or ""
+          assert trace_id, "the run carries no trace id — nothing to correlate on"
+
+          out = {
+              "run_id": run_id,
+              "run_number": detail.get("number") or detail.get("run_number") or "",
+              "trace_id": trace_id,
+          }
+          print("ECHO RUN " + json.dumps(out))
+          json.dump(out, open(sys.argv[1], "w"))
+          PY
+          echo "wrote echo_run.py"
+
+      # ---- The baseline: no overlay, nothing changes -------------------
+      # G0 parity and the bundled Jaeger viewer exactly as they are
+      # today, and NOTHING at the mock. Run before any overlay is
+      # selected, because "nothing was forwarded" is only meaningful
+      # against a mock that has never been pointed at.
+      - name: With no overlay selected, nothing changes
+        run: |
+          set -euo pipefail
+          python3 scripts/librerun_smoke.py \
+            --base-url http://localhost:8000 --agent vita-v1 \
+            --email="$INITIAL_ADMIN_EMAIL" --password="$INITIAL_ADMIN_PASSWORD" \
+            --admin-email="$INITIAL_ADMIN_EMAIL" --admin-password="$INITIAL_ADMIN_PASSWORD" \
+            --trace-viewer-url http://localhost:16686 \
+            --summary-json baseline-smoke.json
+          python3 - <<'PY'
+          import json, pathlib
+          summary = json.loads(pathlib.Path("baseline-smoke.json").read_text())
+          assert summary["stub_llm"] is True, "the baseline run was not keyless"
+          assert summary["trace_id"], "the baseline run carries no trace"
+          print("baseline: G0 parity and the Jaeger tree, as before")
+
+          journal = pathlib.Path("obs-capture/capture.jsonl")
+          body = journal.read_text() if journal.exists() else ""
+          if body.strip():
+              raise SystemExit(
+                  "the mock intake received traffic with NO overlay selected:\n"
+                  + body[:2000]
+              )
+          print("the mock received nothing, as it must with no overlay")
+          PY
+
+      # ---- One vendor at a time ----------------------------------------
+      - name: Datadog — both legs, decoded at the mock
+        run: ./scripts/obs_vendor_leg.sh datadog
+
+      - name: Elastic — both legs, decoded at the mock
+        run: ./scripts/obs_vendor_leg.sh elastic
+
+      - name: Splunk — both legs, decoded at the mock
+        run: ./scripts/obs_vendor_leg.sh splunk
+
+      - name: Diagnostics
+        if: always()
+        run: |
+          mkdir -p obs-artifacts
+          cp -r obs-capture obs-artifacts/ 2>/dev/null || true
+          cp obs-contract-*.json obs-artifacts/ 2>/dev/null || true
+          docker compose logs --no-color vector > obs-artifacts/vector.log 2>&1 || true
+          docker compose logs --no-color otel-bridge > obs-artifacts/otel-bridge.log 2>&1 || true
+          docker compose logs --no-color backend > obs-artifacts/backend.log 2>&1 || true
+          docker logs librerun-obs-mock > obs-artifacts/mock.log 2>&1 || true
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: obs-vendors-artifacts
+          path: obs-artifacts
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Tear down
+        if: always()
+        run: |
+          docker rm -f librerun-obs-mock >/dev/null 2>&1 || true
+          docker compose --profile app --profile viewer --profile demo --profile obs down -v || true
+
+  # ==========================================================================
+  # 3. `observability.env` is OPTIONAL, and it is also a real delivery (K4).
+  #
+  # Two claims, and both need a booted container rather than a render:
+  #
+  #   absent   — `required: false` means what it says. K4 took the sink
+  #              gallery and the Cribl HEC pair out of Vector's
+  #              `environment:` block, so those names are no longer
+  #              present-but-empty; they are simply not there. A config
+  #              that read one without a default would now crash-loop,
+  #              and a `docker compose config` render cannot tell you
+  #              that.
+  #   present  — the file's values REACH the process. "It started" is
+  #              the weaker half of the claim and the easier one to pass
+  #              by accident: a typo in the `env_file` path starts the
+  #              same container with nothing in it.
+  #
+  # The variable used is `VECTOR_OTLP_FORWARD_ENDPOINT`, deliberately:
+  # its sink in config/vector.yaml ships commented out, so a value here
+  # is harmless — nothing dials anything — while still being a name
+  # Vector must have been handed.
+  # ==========================================================================
+  env-file-optional:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      # compose.yaml `include:`s agents.compose.yaml, whose services
+      # interpolate `${LIBRERUN_AGENT_KEY_<ID>:?}` — so EVERY compose
+      # command, `ps` included, needs those names to exist even though
+      # this job starts one service that has nothing to do with agents.
+      # The other jobs in this file solve it the same way: let the demo
+      # write the .env and the keys. The viewer is then blanked, because
+      # an always-on Jaeger forward with no Jaeger running is exactly
+      # the backpressure compose.yaml's own comment warns about, and
+      # this job's whole question is whether `vector` is healthy.
+      - name: An .env with agent keys, and no viewer
+        run: |
+          set -euo pipefail
+          test ! -f .env
+          ./scripts/demo.sh --env-only
+          sed -i -e 's/^VECTOR_VIEWER=.*/VECTOR_VIEWER=/' -e 's/^TRACE_VIEWER=.*/TRACE_VIEWER=off/' .env
+          ./compose.sh ps > /dev/null   # derives agent-keys.env, as it does before every command
+
+      - name: The example exists and the file does not
+        run: |
+          set -euo pipefail
+          test -f observability.env.example
+          test ! -f observability.env
+          test ! -f observability-traces.env
+
+      - name: vector starts with observability.env ABSENT
+        run: |
+          set -euo pipefail
+          ./compose.sh up -d vector
+          ./.github/scripts/wait_healthy.sh vector 120
+          # …and the names K4 moved out really are absent, rather than
+          # present-and-empty. If they come back as empty `environment:`
+          # entries they would silently outrank the file on the next run.
+          # ONE read of the environment, before the loop: four `exec`s
+          # would be four chances at the same race, and `| grep -q`
+          # under `pipefail` reports the PRODUCER's exit status rather
+          # than grep's answer (#81).
+          vector_env="$(docker compose exec -T vector env || true)"
+          for name in VECTOR_OTLP_FORWARD_ENDPOINT CRIBL_HEC_TOKEN DATADOG_API_KEY LOKI_ENDPOINT; do
+            if grep -q "^${name}=" <<< "$vector_env"; then
+              echo "::error::vector was handed $name with no observability.env on disk — it is back in compose's environment: block, where an empty default outranks the file"
+              exit 1
+            fi
+          done
+          echo "vector healthy with no observability.env, and none of the moved names in its environment"
+
+      - name: vector starts with observability.env PRESENT, and reads it
+        run: |
+          set -euo pipefail
+          cp observability.env.example observability.env
+          # A harmless value: the sink that would read it ships commented
+          # out in config/vector.yaml, so nothing dials anything.
+          printf '\nVECTOR_OTLP_FORWARD_ENDPOINT=http://127.0.0.1:9/v1/traces\n' >> observability.env
+          ./compose.sh up -d --force-recreate vector
+          ./.github/scripts/wait_healthy.sh vector 120
+          got="$(docker compose exec -T vector printenv VECTOR_OTLP_FORWARD_ENDPOINT || true)"
+          got="${got%$'\r'}"
+          if [ "$got" != "http://127.0.0.1:9/v1/traces" ]; then
+            echo "::error::vector's VECTOR_OTLP_FORWARD_ENDPOINT is '${got}' — observability.env is on disk and its value did not reach the process, so the env_file entry is not delivering"
+            exit 1
+          fi
+          echo "vector healthy with observability.env, and the file's value is in the process"
+
+      # The negative half: the check above must be able to FAIL. With the
+      # file on disk but the variable taken back out of it, the same
+      # assertion has to go red — otherwise it is passing on the name
+      # existing for some other reason.
+      - name: The delivery check bites when the value is removed (negative case)
+        run: |
+          set -euo pipefail
+          grep -v '^VECTOR_OTLP_FORWARD_ENDPOINT=' observability.env > observability.env.tmp
+          mv observability.env.tmp observability.env
+          ./compose.sh up -d --force-recreate vector
+          ./.github/scripts/wait_healthy.sh vector 120
+          got="$(docker compose exec -T vector printenv VECTOR_OTLP_FORWARD_ENDPOINT || true)"
+          got="${got%$'\r'}"
+          if [ "$got" = "http://127.0.0.1:9/v1/traces" ]; then
+            echo "::error::the value is still in vector's environment after being deleted from observability.env — the step above proves nothing"
+            exit 1
+          fi
+          echo "…gone, as it must be: the delivery check is reading the file"
+
+      - name: Diagnostics
+        if: always()
+        run: ./compose.sh logs --no-color vector | tail -80 || true
+
+      - name: Tear down
+        if: always()
+        run: |
+          rm -f observability.env
+          ./compose.sh down -v || true

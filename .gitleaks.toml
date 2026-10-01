@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+#
+# gitleaks' configuration for scripts/review_public_tree.sh (R16, A3).
+# Every default rule stays on. A fixture that a rule flags gets one entry
+# here: its rule and its one file, never a directory, with the reason in
+# its description and in §11 of docs/Configuration_Secrets_Blueprint.md.
+# A live credential never goes here: it is rotated (C-23).
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "K4b's doctor tests: a made-up password sent to a fake backend, never a real one"
+targetRules = ["generic-api-key"]
+paths = ['''^backend/tests/test_librerun_cli\.py$''']
+
+[[allowlists]]
+description = "T2's certificate tests: a canary line the test wraps in PRIVATE KEY armour at run time"
+targetRules = ["generic-api-key"]
+paths = ['''^frontend/src/components/__tests__/CertificatesPanel\.test\.tsx$''']

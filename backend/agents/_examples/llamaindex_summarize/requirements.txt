@@ -1,0 +1,12 @@
+# The example's own dependencies, pinned so the image builds the same
+# way twice. The agent SDK is installed from the source tree by the
+# Dockerfile (it is not published anywhere yet), so it is not named here.
+#
+# ``openai-like`` rather than ``llama-index-llms-openai``: the model
+# string this agent sends is a STEP id (``librerun/extract``), not an
+# OpenAI model name, and the OpenAI integration looks its model up in a
+# table of known models to find a context window. OpenAILike is the
+# integration meant for an OpenAI-compatible endpoint whose model names
+# are its own — which is exactly what the LibreRun gateway is.
+llama-index-core==0.14.24
+llama-index-llms-openai-like==0.8.0

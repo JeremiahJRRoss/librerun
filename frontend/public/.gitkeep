@@ -1,0 +1,3 @@
+# Keep this directory in git. Next.js standalone images COPY /app/public;
+# git cannot track empty directories, so without this file every fresh
+# clone fails the Docker build at that step. Drop favicons/static assets here.

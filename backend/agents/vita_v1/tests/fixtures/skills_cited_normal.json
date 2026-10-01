@@ -1,0 +1,32 @@
+[
+  {
+    "name": "Cribl Stream and Elasticsearch Integration",
+    "source": "vendor_docs",
+    "description": "This skill involves configuring Cribl Stream to send processed data to Elasticsearch, ensuring that data formats and field mappings are compatible between the two systems. It requires understanding how Cribl Stream's data transformation capabilities can be used to prepare data for Elasticsearch ingestion, including field normalization and timestamp handling.",
+    "relevance_weight": 1.0
+  },
+  {
+    "name": "Timestamp Management and Conversion",
+    "source": "vendor_docs",
+    "description": "This skill involves managing and converting timestamps between Cribl Stream and Elasticsearch. It includes understanding how to use Cribl Stream's timestamp functions to ensure that timestamps are correctly formatted for Elasticsearch's expectations, such as converting to UNIX_MS or ISO8601 formats.",
+    "relevance_weight": 0.9
+  },
+  {
+    "name": "Error Handling in Data Pipelines",
+    "source": "vendor_docs",
+    "description": "This skill involves diagnosing and resolving errors that occur during data transformation and ingestion processes. It includes understanding how to handle parsing errors, mapping conflicts, and other common issues that can arise when integrating Cribl Stream with Elasticsearch.",
+    "relevance_weight": 0.85
+  },
+  {
+    "name": "Data Transformation and Field Mapping",
+    "source": "vendor_docs",
+    "description": "This skill involves transforming data within Cribl Stream to match the field mappings required by Elasticsearch. It includes using Cribl Stream's functions to rename fields, adjust data types, and ensure compatibility with Elasticsearch's indexing requirements.",
+    "relevance_weight": 0.9
+  },
+  {
+    "name": "Network and Protocol Configuration",
+    "source": "vendor_docs",
+    "description": "This skill involves configuring network settings and protocols to ensure reliable data transmission from Cribl Stream to Elasticsearch. It includes setting up secure connections, managing data routing, and ensuring that network configurations do not impede data flow.",
+    "relevance_weight": 0.8
+  }
+]

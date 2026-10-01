@@ -1,0 +1,195 @@
+# Blueprint B11: the chassis must build and boot with the agents/
+# directory effectively empty — zero agents is a healthy configuration,
+# and importing the chassis must never import agent code. This workflow
+# is the CI teeth for that invariant; the fuller proving ground arrives
+# with blueprint B14.
+name: chassis-zero-agents
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      # Not just this file: this job runs the workflow guards in
+      # test_adapter_kit.py — that the LangGraph suite is run
+      # somewhere, and that every job reporting a pytest run checks it
+      # actually ran. Filtering on `backend/**` alone meant a PR that
+      # ADDED a workflow, renamed one, or edited one on its own matched
+      # nothing here, so the guards skipped exactly the change they
+      # exist to catch. A gate that does not fire on the change it
+      # guards is the same nothing as a comment.
+      - ".github/workflows/**"
+      # The openapi round-trip this suite drives: it exec_modules the
+      # dump script and compares against the committed spec.
+      - "docs/api/openapi.yaml"
+      - "scripts/export_openapi.py"
+      # Root-level pytest configuration, which no derived rule can
+      # reach: the dependency guard below demands coverage for files
+      # that EXIST, and the hazard here is a file's ADDITION. pytest
+      # resolves its configfile by walking UP from the invocation
+      # directory, so one added at the repo root takes effect for
+      # `cd backend && pytest` while matching no pattern above.
+      # Measured: a root pytest.ini setting `python_files` takes the
+      # backend suite from 1051 collected to 0 — and the job that
+      # would have caught it does not run, on the pull request or on
+      # the push to main. The seven filenames are pytest's own
+      # `config_names`, read out of its compiled code rather than
+      # retyped (Codex round 14). `conftest.py` is the eighth: adding
+      # a root ini moves rootdir from backend/ to the repo root, which
+      # is what makes a root conftest load at all. Measured both ways,
+      # against a conftest known to load, because the first attempt
+      # said "neither" and the positive control said the attempt was
+      # broken.
+      - "pytest.toml"
+      - ".pytest.toml"
+      - "pytest.ini"
+      - ".pytest.ini"
+      - "pyproject.toml"
+      - "tox.ini"
+      - "setup.cfg"
+      - "conftest.py"
+      # The shared "the suite RAN" assertion this job now calls. It
+      # lives outside every pattern above, so without this line a pull
+      # request weakening the one rule all these jobs rely on would skip
+      # them all and merge unexercised — the same trap round 3 found in
+      # unit-suites when the assertion was extracted from it.
+      - "scripts/assert_suite_ran.py"
+  pull_request:
+    paths:
+      - "backend/**"
+      - ".github/workflows/**"
+      - "docs/api/openapi.yaml"
+      - "scripts/export_openapi.py"
+      # Root-level pytest configuration — see the push half above.
+      - "pytest.toml"
+      - ".pytest.toml"
+      - "pytest.ini"
+      - ".pytest.ini"
+      - "pyproject.toml"
+      - "tox.ini"
+      - "setup.cfg"
+      - "conftest.py"
+      - "scripts/assert_suite_ran.py"
+
+# No job here needs the token for more than reading the checkout (R11,
+# scripts/check_no_publication.py: a workflow names its permissions).
+permissions:
+  contents: read
+
+jobs:
+  zero-agents-boot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.lock.txt
+
+      - name: Install backend dependencies
+        # pytest ships in requirements.txt in this repo.
+        # From the LOCK, so this job boots the chassis the image actually
+        # ships. The chassis lock deliberately carries no langgraph — the
+        # adapter has its own lock — so the LangGraph-absent premise this
+        # job depends on is unchanged.
+        run: pip install -r requirements.lock.txt
+
+      - name: The spaCy model Presidio's NER stage needs
+        # Blueprint S4c (gap H15). The conformance battery below drives
+        # the chassis's real persist path, and since S4c that path FAILS
+        # CLOSED when the named-entity stage cannot run — so without this
+        # model the battery measures a platform that is refusing
+        # everything, not one that conforms. The image installs the same
+        # model (backend/Dockerfile), which is what this job's
+        # environment is meant to mirror.
+        #
+        # The chassis still BOOTS without it, and that is asserted where
+        # it cannot be lost to a step reordering:
+        # tests/test_pii_fail_closed.py pins the boot and the /health
+        # state with the constructor injected to raise.
+        run: |
+          python -m spacy download en_core_web_lg
+          python -c "import spacy; spacy.load('en_core_web_lg')"
+
+      - name: Empty the agents directory (keep the package marker)
+        # The point of the exercise: every on-disk agent is gone. The
+        # chassis must import, discover zero agents, and serve honestly.
+        #
+        # And then CONFIRM it, because `find` exits 0 whether it removed
+        # four directories or none — it cannot fail for matching nothing.
+        # Arranging a precondition and not checking it is the defect this
+        # whole batch is about, and this was the one step in these
+        # workflows still doing it (Codex rounds 15-16 taught the shape;
+        # censusing the other twelve arrangement steps found them all
+        # confirmed by something downstream).
+        #
+        # Nothing downstream can cover this one, by design: the suite's
+        # lifespan probe redirects discovery at a temp directory when the
+        # real one still has agents, which is right for a dev checkout
+        # and a SILENT DOWNGRADE here — measured, `test_zero_agents_boot`
+        # is `5 passed` with all four agent directories present. So if
+        # this `find` ever stops matching, the job would keep reporting
+        # success while testing the simulated empty directory instead of
+        # the real one, and the log would look identical.
+        run: |
+          set -euo pipefail
+          find agents -mindepth 1 -maxdepth 1 -type d -exec rm -rf {} +
+          remaining=$(find agents -mindepth 1 -maxdepth 1 -type d | wc -l)
+          if [ "$remaining" -ne 0 ]; then
+            echo "the agents directory still holds $remaining director(ies):"
+            find agents -mindepth 1 -maxdepth 1 -type d
+            echo "this job proves nothing about a chassis with zero agents"
+            exit 1
+          fi
+          ls -la agents/
+
+      - name: Zero-agents boot + import-isolation tests
+        run: python -m pytest tests/test_zero_agents_boot.py -q --junitxml=zero-agents-suite.xml
+
+      - name: The zero-agents suite must have RUN, not shrunk
+        run: python3 ../scripts/assert_suite_ran.py zero-agents-suite.xml 5 zero-agents
+
+      - name: Adapter conformance battery (framework-agnostic half)
+        # Deliberately run in THIS job, because this environment is the
+        # one the battery has to survive: requirements.txt only, so no
+        # LangGraph, no adapter, no database, no Redis, and no agents on
+        # disk. The battery's tests originally lived in a single module
+        # behind `importorskip("langgraph")`, which meant a normal
+        # chassis install ran none of them — a conformance suite that
+        # vanishes when an optional package is absent. Running it here
+        # is what stops that silently coming back: if anyone adds an
+        # optional import to test_adapter_kit.py, this step fails
+        # instead of quietly skipping.
+        #
+        # The LangGraph half (test_adapter_kit_langgraph.py) is not run
+        # here on purpose — installing a framework the chassis does not
+        # ship would defeat the point of THIS check. It runs in
+        # adapter-battery.yml, which installs the adapter and asserts the
+        # suite actually executed. This comment used to stop at "is not
+        # run here", which described the gap accurately and left it open:
+        # nothing ran that half anywhere, so the batch's own headline
+        # deliverable had no CI at all.
+        run: python -m pytest tests/test_adapter_kit.py -q --junitxml=chassis-guards-suite.xml
+
+      - name: The chassis guards must have RUN, not shrunk
+        # These are the workflow guards themselves. A narrowing that hid
+        # them would hide every rule they enforce, in the one job that
+        # runs them.
+        #
+        # 139 -> 138 at S7a, which is the one direction this number may
+        # move without suspicion only because the removal is named: the
+        # OTEL exporter's census (`test_every_workflow_is_exported_as_a_trace`)
+        # went with the workflow it guarded, Groundcover not being a
+        # supported vendor (JR, 2026-09-20). Its sibling — that the
+        # census sees `.yaml` workflows too — did NOT go: it is asserted
+        # against `_workflow_files` itself now, which is what every
+        # remaining census calls, so the property outlived its old
+        # consumer. Measured on this job's own report (138), not
+        # subtracted by hand.
+        run: python3 ../scripts/assert_suite_ran.py chassis-guards-suite.xml 138 chassis-guards

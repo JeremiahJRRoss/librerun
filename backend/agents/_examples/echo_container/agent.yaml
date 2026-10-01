@@ -1,0 +1,79 @@
+# Run Contract v1 reference agent (blueprint B12a).
+#
+# This directory lives under agents/_examples/ — the leading underscore
+# keeps it out of production discovery. To actually run it: start the
+# container (or `python echo_agent.py --port 8090`), set ECHO_AGENT_URL,
+# and copy this directory into your agents path (or point
+# LIBRERUN_AGENTS_PATH at a directory containing it).
+manifest_version: 1
+id: echo-v1
+name: Echo Container Agent
+description: Run Contract v1 reference agent — echoes its input back as structured output
+# The badge on the agent card (blueprint S7): a label, nothing the
+# chassis dispatches on. This one is built straight on the Python SDK.
+framework: librerun-agent
+runtime: container
+container:
+  # Expanded from the chassis environment at discovery; registration is
+  # skipped (logged) while the variable is unset.
+  url: ${ECHO_AGENT_URL}
+input_schema: input_schema.json
+phases:
+  - name: echo
+    # The one progress row this agent reports, with the label the run
+    # page shows (blueprint S7). The id equals the LLM step id below,
+    # which is what lets the page show the model that answered it.
+    steps:
+      - id: echo
+        label: Echoing the input through the model
+output:
+  mode: structured
+# The intake PII pipeline on demand (blueprint S4): the MCP ``redact``
+# tool, listed and callable only under this grant. ``llm`` (blueprint
+# S4a) is what lets the gateway answer this agent's model calls at all —
+# without it every one is refused 403 llm_not_granted, whatever
+# credential the container presents.
+capabilities:
+  - pii
+  - llm
+
+# The one LLM step this agent calls (blueprint S4a, L25). The values here
+# are DEFAULTS: the admin agent-configuration page edits the effective
+# provider and model per tenant, and the gateway resolves them at request
+# time, so changing the model restarts nothing.
+llm:
+  steps:
+    - id: echo
+      label: Echo
+      description: Repeats the input back through the model
+      provider: openai
+      model: gpt-4o-mini
+      temperature: 0.0
+      max_tokens: 256
+      timeout_seconds: 30
+
+# The agent's settings (K5a, L32): declared here with their defaults, and
+# valued per tenant on the agent page's Settings tab — any agent gets the
+# tab, a container included, with no code of its own. A run reads the
+# values with `await ctx.config.settings()` (the MCP `config_get` tool,
+# which needs no grant); a tenant that never changed one reads its
+# default, and only a value that differs from the default is stored.
+settings:
+  - key: note
+    label: Note
+    type: string
+    default: echoed by the Run Contract v1 reference agent
+    description: The note the agent puts in its output when a run asks it to read its settings (`show_settings`).
+
+# The tool secret this agent may ask for by name (K8a, D20; K8b): a
+# tenant's admin sets this tenant's value on the agent page's Secrets tab,
+# a platform admin every tenant's default. Asked to (`fetch_secret`), a
+# run reads it with `await ctx.secrets.get("echo_token")` — the MCP
+# `secret_get` tool, which needs no grant — and says only whether it was
+# set: the value never reaches the output, which the chassis persists.
+secrets:
+  - echo_token
+feedback_sections:
+  - id: overall
+    label: Overall
+scenarios: scenarios

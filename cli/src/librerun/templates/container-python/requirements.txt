@@ -1,0 +1,4 @@
+# __AGENT_NAME__'s own dependencies, one pinned line each. The agent SDK
+# is installed from the repository's source tree by the Dockerfile (it is
+# not published yet), so it is not named here. `jsonschema` is a common
+# first addition: validate a model's reply before you rely on it.

@@ -1,0 +1,4085 @@
+# LibreRun API specification — GENERATED FILE (blueprint B10, S1).
+# Regenerate after route changes with the script that keeps this header:
+#   python scripts/export_openapi.py
+# It writes the file rather than printing, because queue-only logging
+# owns stdout since S4 and a redirected print() lands in the log
+# pipeline, leaving the file empty.
+#
+# The platform noun is `run` (decision L18): /runs is the only spelling
+# served; the /cases alias was deleted in S1 and answers 404. run_id /
+# run_number are authoritative; the case_id / case_number duplicates
+# below are marked deprecated and go at v1.1.
+openapi: 3.1.0
+info:
+  title: LibreRun
+  version: 1.1.0-beta.1
+paths:
+  /api/v1/auth/login:
+    post:
+      tags:
+      - auth
+      summary: Login
+      operationId: login_api_v1_auth_login_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/auth/google:
+    post:
+      tags:
+      - auth
+      summary: Login Google
+      operationId: login_google_api_v1_auth_google_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GoogleLoginRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/auth/microsoft:
+    post:
+      tags:
+      - auth
+      summary: Login Microsoft
+      operationId: login_microsoft_api_v1_auth_microsoft_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MicrosoftLoginRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/auth/logout:
+    post:
+      tags:
+      - auth
+      summary: Logout
+      operationId: logout_api_v1_auth_logout_post
+      responses:
+        '204':
+          description: Successful Response
+      security:
+      - HTTPBearer: []
+  /api/v1/auth/me:
+    get:
+      tags:
+      - auth
+      summary: Me
+      operationId: me_api_v1_auth_me_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+      security:
+      - HTTPBearer: []
+  /api/v1/runs:
+    get:
+      tags:
+      - runs
+      summary: List Runs
+      operationId: list_runs_api_v1_runs_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: status
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Status
+      - name: severity
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Severity
+      - name: search
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Search
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+          title: Page
+      - name: per_page
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          default: 20
+          title: Per Page
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunListResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - runs
+      summary: Create Run
+      description: 'Create a run from a schema-validated payload (blueprint B8).
+
+
+        The body shape belongs to the selected agent: it is validated against
+
+        ``agent.input_schema()`` server-side (the wizard enforces the same
+
+        schema client-side), ``x-pii`` string fields are redacted before
+
+        anything is persisted, and well-known keys are lifted into the legacy
+
+        list/search columns.'
+      operationId: create_run_api_v1_runs_post
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: agent_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Agent Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              title: Payload
+      responses:
+        '202':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunCreatedResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/runs/{run_id}:
+    get:
+      tags:
+      - runs
+      summary: Get Run
+      operationId: get_run_api_v1_runs__run_id__get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Run Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunDetail'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - runs
+      summary: Delete Run
+      operationId: delete_run_api_v1_runs__run_id__delete
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Run Id
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/runs/{run_id}/approval:
+    get:
+      tags:
+      - runs
+      summary: Get Approval
+      description: 'What the approval view renders, for every agent (blueprint S2).
+
+
+        ``phase`` is the manifest phase whose output is parked, ``payload``
+
+        that output in full, and ``summary`` the string the manifest''s
+
+        ``ui.approval.summary_path`` names inside it (or the first string in
+
+        it) — what the view shows and offers for editing. While the run is
+
+        still working the answer is ``202`` with ``status`` alone.'
+      operationId: get_approval_api_v1_runs__run_id__approval_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Run Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalResponse'
+        '202':
+          description: 'The run is still working (`submitted` / `refining`): `status`
+            only — `phase`, `payload` and `summary` are null. Poll again.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/runs/{run_id}/refined-statement:
+    get:
+      tags:
+      - runs
+      summary: Get Refined Statement
+      description: 'Deprecated (blueprint S2): the demo agent''s own view of the parked
+        output. `GET /runs/{run_id}/approval` serves every agent''s — read `summary`
+        and `payload` there. Kept for one release, removed at v1.1.'
+      operationId: get_refined_statement_api_v1_runs__run_id__refined_statement_get
+      deprecated: true
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Run Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '202':
+          description: 'The run is still working (`submitted` / `refining`): `{"status":
+            ...}` only. Poll again.'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                required:
+                - status
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/runs/{run_id}/approve:
+    post:
+      tags:
+      - runs
+      summary: Approve Run
+      operationId: approve_run_api_v1_runs__run_id__approve_post
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Run Id
+      responses:
+        '202':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/runs/{run_id}/edit-statement:
+    post:
+      tags:
+      - runs
+      summary: Edit Statement
+      operationId: edit_statement_api_v1_runs__run_id__edit_statement_post
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Run Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EditStatementRequest'
+      responses:
+        '202':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/runs/{run_id}/progress:
+    get:
+      tags:
+      - runs
+      summary: Get Progress
+      operationId: get_progress_api_v1_runs__run_id__progress_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Run Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProgressResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/files/redact-preview:
+    post:
+      tags:
+      - files
+      summary: Redact Preview
+      description: 'Redact an uploaded file and return the result for form prefill.
+
+
+        Generalized in blueprint B8: any ``x-pii``-marked schema field can
+
+        offer this preview — ``file_type`` selects the extension/size policy
+
+        (``log`` or ``config``), and the old demo-agent-shaped ``vendor_side``
+
+        parameter is gone (it never influenced the output).
+
+
+        Answers ``503 pii_detector_unavailable`` when the detector is not
+
+        ready (blueprint S4c): a preview whose whole promise is "this is
+
+        what we would store" must not be able to show text that a broken
+
+        stage 3 left whole.'
+      operationId: redact_preview_api_v1_files_redact_preview_post
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Body_redact_preview_api_v1_files_redact_preview_post'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PiiRedactionPreview'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
+  /api/v1/runs/{run_id}/files:
+    post:
+      tags:
+      - files
+      summary: Upload Run File
+      operationId: upload_run_file_api_v1_runs__run_id__files_post
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Run Id
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Body_upload_run_file_api_v1_runs__run_id__files_post'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - files
+      summary: List Run Files
+      operationId: list_run_files_api_v1_runs__run_id__files_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Run Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/runs/{run_id}/files/{file_id}:
+    get:
+      tags:
+      - files
+      summary: Download Run File
+      operationId: download_run_file_api_v1_runs__run_id__files__file_id__get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Run Id
+      - name: file_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: File Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/feedback:
+    post:
+      tags:
+      - feedback
+      summary: Submit Feedback
+      operationId: submit_feedback_api_v1_feedback_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FeedbackSubmit'
+        required: true
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
+  /api/v1/admin/users:
+    get:
+      tags:
+      - admin
+      summary: List Users
+      operationId: list_users_api_v1_admin_users_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/UserEntry'
+                type: array
+                title: Response List Users Api V1 Admin Users Get
+      security:
+      - HTTPBearer: []
+    post:
+      tags:
+      - admin
+      summary: Invite User
+      operationId: invite_user_api_v1_admin_users_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserInvite'
+        required: true
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserEntry'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
+  /api/v1/admin/users/{user_id}:
+    put:
+      tags:
+      - admin
+      summary: Update User
+      operationId: update_user_api_v1_admin_users__user_id__put
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: User Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserEntry'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/users/{user_id}/revoke:
+    post:
+      tags:
+      - admin
+      summary: Revoke Sessions
+      operationId: revoke_sessions_api_v1_admin_users__user_id__revoke_post
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: User Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/auth-config:
+    get:
+      tags:
+      - admin
+      summary: Get Auth Config
+      operationId: get_auth_config_api_v1_admin_auth_config_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthConfig'
+      security:
+      - HTTPBearer: []
+    put:
+      tags:
+      - admin
+      summary: Put Auth Config
+      operationId: put_auth_config_api_v1_admin_auth_config_put
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthConfig'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthConfig'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
+  /api/v1/admin/runs/{run_id}:
+    get:
+      tags:
+      - admin
+      summary: Get Admin Run Detail
+      description: 'Admin-only run detail including raw OTEL trace_id and Phase 2
+
+        span_id. The trace deep-link (``trace_url``) also appears on the
+
+        customer-facing ``GET /runs/{run_id}`` since blueprint B5 — the
+
+        raw ids stay admin-only.'
+      operationId: get_admin_run_detail_api_v1_admin_runs__run_id__get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Run Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminRunDetail'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/feedback:
+    get:
+      tags:
+      - admin
+      summary: Feedback Aggregate
+      operationId: feedback_aggregate_api_v1_admin_feedback_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: days
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 3650
+          minimum: 1
+          default: 90
+          title: Days
+      - name: section_type
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Section Type
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedbackAggregate'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/otel-status:
+    get:
+      tags:
+      - admin
+      - admin-observability
+      summary: Otel Status
+      description: 'Introspect the live OpenTelemetry TracerProvider and the vendor
+        overlay.
+
+
+        Shows the provider class, every attached span processor + exporter
+
+        (with endpoint), the OTLP export configuration, and runs a
+
+        ``force_flush(5000ms)`` as a liveness check. ``force_flush_5s=True``
+
+        means the BatchSpanProcessor queue drained inside 5 seconds — spans
+
+        reached the OTLP endpoint. ``False`` means the exporter is stuck;
+
+        pair with ``OTEL_DEBUG=true`` (exporter DEBUG logs) to find the cause.
+
+
+        ``overlay`` answers the question an operator asks when telemetry
+
+        leaves the box (blueprint S7a): which vendor overlay Vector and the
+
+        otel-bridge were started with, the config files that selection
+
+        loads, and the sinks those files declare. An unrecognised
+
+        ``LIBRERUN_OBS_VENDOR`` is reported ``supported=false`` — Vector and
+
+        the bridge refuse to start on one, so nothing is being forwarded.
+
+        The backend holds none of the vendor''s credentials; it has the name
+
+        alone. ``vector`` is the router''s reachability FROM THE BACKEND (a
+
+        TCP connect to the OTLP endpoint it exports to), because Vector''s
+
+        own API is loopback-only inside its container by design.
+
+
+        Platform-admin only (K9-05): all it shows is the deployment''s, none
+
+        of it a tenant''s. Every endpoint passes ``strip_url`` — no URL''s
+
+        userinfo or query leaves — and a failed flush names its exception''s
+
+        class alone, as ``/health`` does.'
+      operationId: otel_status_api_v1_admin_otel_status_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Otel Status Api V1 Admin Otel Status Get
+      security:
+      - HTTPBearer: []
+  /api/v1/admin/settings:
+    get:
+      tags:
+      - admin
+      - admin-settings
+      summary: List runtime-tunable application settings
+      description: 'Return every registered app setting with its effective value.
+
+
+        Values marked ``is_default=true`` are using the ``.env`` / ``config.py``
+
+        fallback; values marked ``false`` have a DB override. A ``secret``
+
+        setting answers ``value`` and ``default_value`` null and says where its
+
+        value comes from in ``secret`` — never the value (L31).'
+      operationId: list_app_settings_api_v1_admin_settings_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/SettingResponse'
+                type: array
+                title: Response List App Settings Api V1 Admin Settings Get
+      security:
+      - HTTPBearer: []
+  /api/v1/admin/settings/{key}:
+    put:
+      tags:
+      - admin
+      - admin-settings
+      summary: Update a single app setting
+      description: 'Persist a new value for ``key``. The request value is coerced
+        to the
+
+        setting''s declared type before being stored. Editing ``cors_origins`` sets
+
+        a restart-required flag (see ``/health``).
+
+
+        Platform-operator only: these rows are application-global — every
+
+        tenant''s requests read them — so a tenant admin must not be able to
+
+        configure what other tenants see.
+
+
+        A ``secret`` setting is sealed into the encrypted secrets store (K6):
+
+        the response and the audit row carry no value — the audit detail is
+
+        ``{setting, action: set | replace}`` — and with no store key the write
+
+        answers ``503 secrets_store_unconfigured``.'
+      operationId: update_app_setting_api_v1_admin_settings__key__put
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: key
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SettingUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettingResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/settings/reset/{key}:
+    post:
+      tags:
+      - admin
+      - admin-settings
+      summary: Reset a setting to its .env / config default
+      description: 'Delete the DB override for ``key``, reverting to the ``.env``
+        default.
+
+
+        For a ``secret`` setting this is Clear: the store''s row is removed, the
+
+        environment''s value applies again, and the audit detail is ``{setting,
+
+        action: clear}``.'
+      operationId: reset_app_setting_api_v1_admin_settings_reset__key__post
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: key
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Key
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettingResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/audit-log:
+    get:
+      tags:
+      - admin
+      summary: List Audit Log
+      operationId: list_audit_log_api_v1_admin_audit_log_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+          title: Page
+      - name: per_page
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 200
+          minimum: 1
+          default: 50
+          title: Per Page
+      - name: action_type
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Action Type
+      - name: user_email
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: User Email
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/drift-summary:
+    get:
+      tags:
+      - admin
+      summary: Drift Summary
+      description: 'Counts and recent samples of LLM schema-drift audit events.
+
+
+        Tenant-scoped via the admin''s own tenant_id; require_admin enforces role.'
+      operationId: drift_summary_api_v1_admin_drift_summary_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+      security:
+      - HTTPBearer: []
+  /api/v1/admin/agent-keys:
+    get:
+      tags:
+      - admin
+      summary: List Agent Keys
+      operationId: list_agent_keys_api_v1_admin_agent_keys_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: agent_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            maxLength: 50
+            pattern: ^[a-z0-9][a-z0-9-]*$
+          - type: 'null'
+          title: Agent Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AgentKeyRow'
+                title: Response List Agent Keys Api V1 Admin Agent Keys Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/agent-keys/{agent_id}:
+    post:
+      tags:
+      - admin
+      summary: Issue Agent Key
+      description: 'A first key for an agent that has none. The value is in this
+
+        response and nowhere else, ever again.'
+      operationId: issue_agent_key_api_v1_admin_agent_keys__agent_id__post
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          maxLength: 50
+          pattern: ^[a-z0-9][a-z0-9-]*$
+          title: Agent Id
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IssuedAgentKey'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - admin
+      summary: Revoke Agent Keys
+      description: 'Drop every admin-issued key for one agent. An environment key
+        is
+
+        left alone — the environment is its source of truth and the gateway
+
+        would reinstall it at the next boot, so deleting one here would look
+
+        like a revocation that silently undid itself.'
+      operationId: revoke_agent_keys_api_v1_admin_agent_keys__agent_id__delete
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          maxLength: 50
+          pattern: ^[a-z0-9][a-z0-9-]*$
+          title: Agent Id
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/agent-keys/{agent_id}/rotate:
+    post:
+      tags:
+      - admin
+      summary: Rotate Agent Key
+      description: 'A new current key; the old one keeps working for ``grace_hours``
+
+        so a container still holding it has time to be recreated.'
+      operationId: rotate_agent_key_api_v1_admin_agent_keys__agent_id__rotate_post
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          maxLength: 50
+          pattern: ^[a-z0-9][a-z0-9-]*$
+          title: Agent Id
+      - name: grace_hours
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 720
+          minimum: 0
+          default: 24
+          title: Grace Hours
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RotatedAgentKey'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/providers:
+    get:
+      tags:
+      - admin
+      - admin-settings
+      summary: What the gateway holds for each model provider, and the key to seal
+        to
+      description: 'The gateway''s own report (``gateway_status``): each provider-key
+        name
+
+        with its aliases, where its key comes from, a stored key''s fingerprint
+
+        and state — ``pending`` while a key set here waits for the gateway —
+
+        and the public key the browser seals a new one to. Never a key.'
+      operationId: list_providers_api_v1_admin_providers_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProvidersStatus'
+      security:
+      - HTTPBearer: []
+  /api/v1/admin/providers/{name}/key:
+    post:
+      tags:
+      - admin
+      - admin-settings
+      summary: Store a provider key sealed to the gateway, for the gateway to adopt
+      description: '``202 {name, row: pending}``: the blob is stored as the ``gateway``
+
+        row ``provider.<name>``; the gateway adopts it within seconds, and
+
+        the list then shows its fingerprint. A raw key is refused ``400
+
+        plaintext_refused`` and nothing is written.'
+      operationId: set_provider_key_api_v1_admin_providers__name__key_post
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProviderKeyUpdate'
+      responses:
+        '202':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderKeyAccepted'
+        '400':
+          description: 'plaintext_refused: the body is not one sealed 3072-bit block'
+        '404':
+          description: unknown_provider
+        '503':
+          description: 'secrets_store_unconfigured: the gateway published no public
+            key'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - admin
+      - admin-settings
+      summary: Remove a stored provider key; the gateway's environment serves that
+        provider again
+      description: 'The stored row goes, whatever its state, and the gateway drops
+        the
+
+        key at its next reload. Audited ``{surface, provider, action: clear}``.'
+      operationId: clear_provider_key_api_v1_admin_providers__name__key_delete
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '204':
+          description: Successful Response
+        '404':
+          description: unknown_provider
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/deployment:
+    get:
+      tags:
+      - admin
+      - admin-settings
+      summary: 'The deployment as the backend reads it: posture read-only, each value
+        with its source'
+      description: 'The version, licence and source; the gateway''s version, report
+        and
+
+        keyless mode; each allowlisted setting with its value, ``env`` or
+
+        ``default``, and where to change it; the OTLP header variables, set or
+
+        not; and ``transport``, this request''s own scheme and host (D43):
+
+        ``https`` through the edge, whose forwarding headers the backend
+
+        believes from the edge''s address alone, or plain ``http``.'
+      operationId: get_deployment_api_v1_admin_deployment_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentView'
+      security:
+      - HTTPBearer: []
+  /api/v1/admin/tls:
+    get:
+      tags:
+      - admin
+      - admin-settings
+      summary: What the HTTPS edge serves, the source in effect and why, and what
+        it needs next
+      description: 'The site''s names, the issuer, the root and the leaf the edge
+        serves —
+
+        public material alone — the source in effect (the environment, or a
+
+        choice made here) and why, and ``needs``, each with its action. With no
+
+        answer from edge-control, ``200`` and ``needs: [edge_off]``: the ``tls``
+
+        profile is off, and there is nothing to change.'
+      operationId: get_tls_status_api_v1_admin_tls_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TlsStatus'
+      security:
+      - HTTPBearer: []
+  /api/v1/admin/tls/root.pem:
+    get:
+      tags:
+      - admin
+      - admin-settings
+      summary: The root the edge issues from, for the browsers to trust
+      description: 'Public: the certificate every browsing machine trusts
+
+        (``docs/platform/Install.md``, "Trust the local CA"). Never a key.'
+      operationId: get_tls_root_api_v1_admin_tls_root_pem_get
+      responses:
+        '200':
+          description: The root certificate, PEM
+          content:
+            application/x-pem-file: {}
+        '404':
+          description: 'no_root: the edge issues from no CA of its own, or is off'
+      security:
+      - HTTPBearer: []
+  /api/v1/admin/tls/acknowledge:
+    post:
+      tags:
+      - admin
+      - admin-settings
+      summary: Record the root in use as the one the browsers were told to trust
+      description: 'Clears ``trust_root`` and ``root_changed`` until the root changes.
+
+        Audited ``config_change`` ``{surface: tls, action: acknowledge_root,
+
+        root}``, the root''s SHA-256.'
+      operationId: acknowledge_tls_root_api_v1_admin_tls_acknowledge_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TlsStatus'
+        '409':
+          description: 'no_root: the edge issues from no CA of its own, or is off'
+      security:
+      - HTTPBearer: []
+  /api/v1/admin/tls/authorize:
+    get:
+      tags:
+      - admin
+      - admin-settings
+      summary: 'The edge''s forward_auth for a certificate change: reads no body'
+      description: 'Asked by the edge before it sends a certificate change to
+
+        edge-control, with the request''s headers — its ``X-Forwarded-Method``
+
+        and ``X-Forwarded-Uri`` — and never its body, which this route does not
+
+        read. A platform admin gets ``204`` and ``X-Librerun-Chosen-By``, their
+
+        id, which the edge passes on in place of any a client sent; anyone else
+
+        gets the gate''s refusal, which the edge returns as it is. The change it
+
+        lets through is audited ``config_change`` ``{surface: tls, route,
+
+        change}``, as K7''s are.'
+      operationId: authorize_tls_change_api_v1_admin_tls_authorize_get
+      responses:
+        '204':
+          description: Successful Response
+        '404':
+          description: 'not_a_change: the forwarded method and path are not one of
+            the four'
+      security:
+      - HTTPBearer: []
+  /api/v1/runs/{run_id}/report/embedded:
+    get:
+      tags:
+      - reports
+      summary: Get Embedded Report
+      description: 'Return the rendered report body as an HTML string for the React
+        page.
+
+
+        Tenant-scoped + owner-checked: only the case owner (or tenant admin)
+
+        can fetch it. The returned HTML is the same template as the PDF/HTML
+
+        download, with ``embedded=True`` (no ``<html>``/``<head>`` wrapper and
+
+        a CSS prefix the agent''s template scopes its own styles under).'
+      operationId: get_embedded_report_api_v1_runs__run_id__report_embedded_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Run Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/runs/{run_id}/report:
+    post:
+      tags:
+      - reports
+      summary: Create Report
+      operationId: create_report_api_v1_runs__run_id__report_post
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Run Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportCreate'
+      responses:
+        '202':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/tasks/{task_id}:
+    get:
+      tags:
+      - reports
+      summary: Get Task
+      operationId: get_task_api_v1_tasks__task_id__get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: task_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Task Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/tasks/{task_id}/download:
+    get:
+      tags:
+      - reports
+      summary: Download Task
+      operationId: download_task_api_v1_tasks__task_id__download_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: task_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Task Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/agents:
+    get:
+      tags:
+      - agents
+      summary: List Agents Endpoint
+      description: 'Summary of every discovered agent, manifest fields included.
+
+
+        ``has_config`` tells the admin UI whether to render a config page or
+
+        show "managed by the agent". It is the SAME predicate the config
+
+        route uses, and has to be: fixing the route to serve a manifest-only
+
+        agent''s steps while this still asked ``config_meta()`` left a
+
+        container agent''s card saying "No admin config" with no link to the
+
+        page that had just started working (Codex P1). A gate and the link
+
+        to what it gates are one decision. ``phases``/``ui``/``output``/``capabilities``
+
+        come from the agent''s manifest (blueprint B7) so the frontend renders
+
+        from data instead of special-casing agent ids; ``has_scenarios`` tells
+
+        the intake page whether to offer the "Load scenario" control.'
+      operationId: list_agents_endpoint_api_v1_agents_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  additionalProperties: true
+                  type: object
+                type: array
+                title: Response List Agents Endpoint Api V1 Agents Get
+      security:
+      - HTTPBearer: []
+  /api/v1/agents/{agent_id}/scenarios:
+    get:
+      tags:
+      - agents
+      summary: List Scenarios Endpoint
+      description: 'Demo scenarios for the intake "Load scenario" control.
+
+
+        Each entry''s ``user_inputs`` prefills the intake form and doubles as a
+
+        submittable ``POST /runs`` body. An agent without a scenarios
+
+        directory simply returns ``[]``.'
+      operationId: list_scenarios_endpoint_api_v1_agents__agent_id__scenarios_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Agent Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+                title: Response List Scenarios Endpoint Api V1 Agents  Agent Id  Scenarios
+                  Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/agents/{agent_id}/input-schema:
+    get:
+      tags:
+      - agents
+      summary: Get Input Schema
+      operationId: get_input_schema_api_v1_agents__agent_id__input_schema_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Agent Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Get Input Schema Api V1 Agents  Agent Id  Input Schema
+                  Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/agents/{agent_id}/config:
+    get:
+      tags:
+      - agents
+      summary: Get Config
+      description: 'This tenant''s effective configuration for one agent.
+
+
+        The steps come from the agent''s manifest (``llm.steps``) with this
+
+        TENANT''s overrides applied (blueprint S4a). They used to come from
+
+        the agent instance, whose one implementation wrote one shared file —
+
+        so a second tenant''s edit overwrote the first and every tenant read
+
+        the same value.
+
+
+        The settings follow them since K5a (L32): ``meta.settings`` is the
+
+        manifest''s ``settings[]`` and ``settings`` this tenant''s effective
+
+        values, each marked ``overridden`` where it is the tenant''s choice
+
+        rather than the default. An agent still on the deprecated protocol
+
+        path is served in the same shapes, its values ``get_settings()``''s —
+
+        one for every tenant — and ``meta.deprecated`` says so, which is what
+
+        the Settings tab shows in place of the tenant''s scope.'
+      operationId: get_config_api_v1_agents__agent_id__config_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Agent Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Get Config Api V1 Agents  Agent Id  Config Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/agents/{agent_id}/config/steps:
+    put:
+      tags:
+      - agents
+      summary: Update Steps
+      operationId: update_steps_api_v1_agents__agent_id__config_steps_put
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Agent Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: object
+                additionalProperties: true
+              title: Payload
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/agents/{agent_id}/config/settings:
+    put:
+      tags:
+      - agents
+      summary: Update Settings Endpoint
+      description: 'Save this tenant''s settings: ``[{key, value}]``, ``null`` for
+        the
+
+        default (K5a).
+
+
+        Every value is held to the type its setting declares before anything
+
+        is written, and one refusal — a key the agent does not declare, a
+
+        value its type refuses — answers ``400 setting ''<key>'': …`` and writes
+
+        nothing. A value equal to the default is stored as no row at all
+
+        (D17). The deprecated protocol path takes the same body and makes one
+
+        ``update_settings({key: value})`` call, ``null`` sending the declared
+
+        default. The audit row names the keys whose value changed.'
+      operationId: update_settings_endpoint_api_v1_agents__agent_id__config_settings_put
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Agent Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/AgentSettingUpdate'
+              title: Payload
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/agents/{agent_id}/secrets:
+    get:
+      tags:
+      - agents
+      summary: The declared tool secrets' state in this tenant, never a value
+      description: 'Each name the manifest declares in ``secrets[]``: this tenant''s
+        row,
+
+        every tenant''s default and, for an in-process agent, the environment''s
+
+        fallback — each set or not, its fingerprint, who and when, and when a
+
+        run last read it — and ``effective``, where a run of this tenant reads
+
+        it now. Never a value (L31).'
+      operationId: list_agent_secrets_api_v1_agents__agent_id__secrets_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Agent Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentSecretsList'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/agents/{agent_id}/secrets/{scope}/{name}:
+    put:
+      tags:
+      - agents
+      summary: 'Set a tool secret''s value: this tenant''s, or every tenant''s default'
+      description: '``{value}`` → ``200`` and the name''s state. The body is read
+        by hand,
+
+        so no refusal can echo it, and the value is stored stripped. Audited
+
+        ``{surface: agent_secrets, agent_id, name, scope, action: set |
+
+        replace}`` without the value; the row and its audit commit together,
+
+        and only then is every process told.'
+      operationId: set_agent_secret_api_v1_agents__agent_id__secrets__scope___name__put
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Agent Id
+      - name: scope
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Scope
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentSecretState'
+        '400':
+          description: 'secret_value_invalid: the body is not {value} with 8 to 4096
+            characters'
+        '403':
+          description: 'platform_admin_only: the default (scope agent) is a platform
+            admin''s'
+        '404':
+          description: unknown agent, or secret_not_declared
+        '422':
+          description: 'secret_scope_invalid: the scope is not tenant or agent'
+        '503':
+          description: secrets_store_unconfigured or secrets_store_key_shared
+    delete:
+      tags:
+      - agents
+      summary: Clear a tool secret's value; the next source in the order serves
+      description: '``204``, whether or not there was a row — idempotent, and it needs
+        no
+
+        store key, so a row sealed under a lost key can still be cleared.
+
+        Audited ``{…, action: clear}``; committed, then every process told.'
+      operationId: clear_agent_secret_api_v1_agents__agent_id__secrets__scope___name__delete
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Agent Id
+      - name: scope
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Scope
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '204':
+          description: Successful Response
+        '403':
+          description: 'platform_admin_only: the default (scope agent) is a platform
+            admin''s'
+        '404':
+          description: unknown agent, or secret_not_declared
+        '422':
+          description: 'secret_scope_invalid: the scope is not tenant or agent'
+  /api/v1/mcp:
+    post:
+      tags:
+      - mcp
+      summary: Mcp Endpoint
+      description: The stateless streamable-HTTP MCP endpoint.
+      operationId: mcp_endpoint_api_v1_mcp_post
+      parameters:
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/_o/e:
+    post:
+      tags:
+      - observability
+      summary: Ingest Ux Telemetry
+      operationId: ingest_ux_telemetry_api_v1__o_e_post
+      responses:
+        '202':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Ingest Ux Telemetry Api V1  O E Post
+      security:
+      - HTTPBearer: []
+  /api/v1/_o/otlp/v1/traces:
+    post:
+      tags:
+      - observability
+      summary: Relay Traces
+      operationId: relay_traces_api_v1__o_otlp_v1_traces_post
+      parameters:
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      responses:
+        '202':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Relay Traces Api V1  O Otlp V1 Traces Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - observability
+      summary: Relay Method Not Allowed
+      operationId: relay_method_not_allowed_api_v1__o_otlp_v1_traces_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /api/v1/_o/otlp/v1/logs:
+    post:
+      tags:
+      - observability
+      summary: Relay Logs
+      operationId: relay_logs_api_v1__o_otlp_v1_logs_post
+      parameters:
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      responses:
+        '202':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Relay Logs Api V1  O Otlp V1 Logs Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - observability
+      summary: Relay Method Not Allowed
+      operationId: relay_method_not_allowed_api_v1__o_otlp_v1_logs_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /api/v1/meta:
+    get:
+      summary: Meta
+      description: 'Public deployment facts (blueprint S3): what the login page and
+        the
+
+        demo banner need before anyone signs in. Carries no secret and no
+
+        per-tenant data — the agent list is the catalogue (ids and names),
+
+        never a run.
+
+
+        ``license`` and ``source_url`` say which licence this LibreRun is under
+
+        and where the source of the version it runs can be fetched (K blueprint
+
+        A1, R17), so that anyone using it over a network can find what AGPL-3.0
+
+        section 13 offers them: ``LIBRERUN_SOURCE_URL`` when the operator sets
+
+        it, and otherwise the public repository at the running version''s tag.'
+      operationId: meta_api_v1_meta_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Meta Api V1 Meta Get
+  /api/v1/health:
+    get:
+      summary: Health
+      operationId: health_api_v1_health_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+components:
+  schemas:
+    AdminRunDetail:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        run_number:
+          type: string
+          title: Run Number
+        title:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Title
+        approval_summary:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Approval Summary
+        vendor_a:
+          anyOf:
+          - $ref: '#/components/schemas/VendorInput'
+          - type: 'null'
+        vendor_b:
+          anyOf:
+          - $ref: '#/components/schemas/VendorInput'
+          - type: 'null'
+        vendor_a_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Vendor A Name
+        vendor_b_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Vendor B Name
+        problem_summary:
+          type: string
+          title: Problem Summary
+          description: 'Deprecated (LibreRun blueprint S2): `title` replaces it; kept
+            identical for one release and removed at v1.1. Read `title` instead.'
+          default: ''
+          deprecated: true
+        severity:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Severity
+        status:
+          type: string
+          title: Status
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        use_case:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Use Case
+        problem_statement:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Problem Statement
+          description: 'Deprecated (LibreRun blueprint S2): `title` replaces it; kept
+            identical for one release and removed at v1.1. Read `title` instead.'
+          deprecated: true
+        impact_statement:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Impact Statement
+        refined_problem_statement:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Refined Problem Statement
+          description: 'Deprecated (LibreRun blueprint S2): `approval_summary` replaces
+            it; kept identical for one release and removed at v1.1. Read `approval_summary`
+            instead.'
+          deprecated: true
+        agent_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Agent Id
+        user_inputs:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: User Inputs
+        output_mode:
+          type: string
+          title: Output Mode
+          default: html_report
+        structured_output:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Structured Output
+        feedback_sections:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Feedback Sections
+        trace_url:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Trace Url
+        error_code:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error Code
+        error_message:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error Message
+        case_number:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Case Number
+          description: 'Deprecated duplicate of `run_number` (LibreRun speaks `run`,
+            blueprint S1 / decision L18): always identical to `run_number`, emitted
+            for one release and removed at v1.1. Read `run_number` instead.'
+          deprecated: true
+        trace_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Trace Id
+        phase2_span_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Phase2 Span Id
+        error_detail:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error Detail
+      type: object
+      required:
+      - id
+      - run_number
+      - severity
+      - status
+      - created_at
+      - updated_at
+      title: AdminRunDetail
+      description: 'Admin-only run detail. Adds observability fields that are deliberately
+
+        kept off the customer ``RunDetail`` response.'
+    AgentKeyRow:
+      properties:
+        agent_id:
+          type: string
+          title: Agent Id
+        key_prefix:
+          type: string
+          title: Key Prefix
+          description: The eight characters after lr_agent_
+        source:
+          type: string
+          enum:
+          - env
+          - admin
+          title: Source
+          description: 'env: installed from the gateway''s environment, rotated in
+            .env; admin: issued here'
+        role:
+          type: string
+          enum:
+          - current
+          - previous
+          title: Role
+        issued_at:
+          type: string
+          format: date-time
+          title: Issued At
+        issued_by:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Issued By
+        previous_since:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Previous Since
+        previous_until:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Previous Until
+        last_used_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Last Used At
+        rotatable:
+          type: boolean
+          title: Rotatable
+          description: 'Whether this page can rotate or revoke it: admin keys alone'
+        registered:
+          type: boolean
+          title: Registered
+          description: Whether an agent of this id is registered in this backend
+      type: object
+      required:
+      - agent_id
+      - key_prefix
+      - source
+      - role
+      - issued_at
+      - rotatable
+      - registered
+      title: AgentKeyRow
+      description: 'One installed agent key: never its value (D10).'
+    AgentSecretState:
+      properties:
+        name:
+          type: string
+          title: Name
+        effective:
+          type: string
+          enum:
+          - tenant
+          - agent
+          - environment
+          - unset
+          title: Effective
+        tenant:
+          $ref: '#/components/schemas/SecretRow'
+        agent:
+          $ref: '#/components/schemas/SecretRow'
+        environment:
+          anyOf:
+          - $ref: '#/components/schemas/SecretRow'
+          - type: 'null'
+      type: object
+      required:
+      - name
+      - effective
+      - tenant
+      - agent
+      title: AgentSecretState
+      description: 'One declared name in this tenant. ``effective`` is where a run
+        of
+
+        this tenant would read it now: ``tenant``, ``agent`` (the default),
+
+        ``environment`` (an in-process agent''s fallback) or ``unset``.
+
+        ``environment`` is ``null`` for a container, whose own environment the
+
+        platform cannot see.'
+    AgentSecretsList:
+      properties:
+        agent_id:
+          type: string
+          title: Agent Id
+        runtime:
+          type: string
+          title: Runtime
+        secrets:
+          items:
+            $ref: '#/components/schemas/AgentSecretState'
+          type: array
+          title: Secrets
+      type: object
+      required:
+      - agent_id
+      - runtime
+      - secrets
+      title: AgentSecretsList
+      description: '``GET /agents/{id}/secrets``: every name the manifest declares,
+        in
+
+        its order.'
+    AgentSettingUpdate:
+      properties:
+        key:
+          type: string
+          maxLength: 64
+          minLength: 1
+          title: Key
+        value:
+          title: Value
+      additionalProperties: false
+      type: object
+      required:
+      - key
+      - value
+      title: AgentSettingUpdate
+      description: 'One setting to save. ``value: null`` returns it to the agent''s
+
+        default, which is also what a value equal to the default does.'
+    ApprovalResponse:
+      properties:
+        status:
+          type: string
+          title: Status
+        phase:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Phase
+        payload:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Payload
+        summary:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Summary
+      type: object
+      required:
+      - status
+      title: ApprovalResponse
+      description: 'What the approval view renders for a run (blueprint S2, generic
+
+        across agents): the parked phase, its full output, and the summary
+
+        string the manifest''s ``ui.approval.summary_path`` names. While the
+
+        run is still working the endpoint answers 202 with ``status`` only.'
+    AuthConfig:
+      properties:
+        google_enabled:
+          type: boolean
+          title: Google Enabled
+          default: true
+        google_allowed_domains:
+          items:
+            type: string
+          type: array
+          title: Google Allowed Domains
+          default: []
+        google_allowed_emails:
+          items:
+            type: string
+          type: array
+          title: Google Allowed Emails
+          default: []
+        microsoft_enabled:
+          type: boolean
+          title: Microsoft Enabled
+          default: true
+        microsoft_allowed_tenants:
+          items:
+            type: string
+          type: array
+          title: Microsoft Allowed Tenants
+          default: []
+        microsoft_allowed_emails:
+          items:
+            type: string
+          type: array
+          title: Microsoft Allowed Emails
+          default: []
+        credentials_enabled:
+          type: boolean
+          title: Credentials Enabled
+          default: false
+      type: object
+      title: AuthConfig
+    Body_redact_preview_api_v1_files_redact_preview_post:
+      properties:
+        file:
+          type: string
+          contentMediaType: application/octet-stream
+          title: File
+        file_type:
+          type: string
+          title: File Type
+          default: log
+      type: object
+      required:
+      - file
+      title: Body_redact_preview_api_v1_files_redact_preview_post
+    Body_upload_run_file_api_v1_runs__run_id__files_post:
+      properties:
+        file:
+          type: string
+          contentMediaType: application/octet-stream
+          title: File
+        vendor_side:
+          type: string
+          title: Vendor Side
+        file_type:
+          type: string
+          title: File Type
+      type: object
+      required:
+      - file
+      - vendor_side
+      - file_type
+      title: Body_upload_run_file_api_v1_runs__run_id__files_post
+    DeploymentGateway:
+      properties:
+        reachable:
+          type: boolean
+          title: Reachable
+          description: Whether the gateway's /healthz answered
+        reported:
+          type: boolean
+          title: Reported
+          description: Whether the gateway has written its status row
+        version:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Version
+        updated_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Updated At
+          description: When the gateway last wrote its row
+        providers:
+          items:
+            $ref: '#/components/schemas/DeploymentProvider'
+          type: array
+          title: Providers
+      type: object
+      required:
+      - reachable
+      - reported
+      title: DeploymentGateway
+    DeploymentHeader:
+      properties:
+        name:
+          type: string
+          title: Name
+        set:
+          type: boolean
+          title: Set
+      type: object
+      required:
+      - name
+      - set
+      title: DeploymentHeader
+      description: 'An OTLP header variable, by presence alone: it can carry a credential.'
+    DeploymentProvider:
+      properties:
+        name:
+          type: string
+          title: Name
+        source:
+          anyOf:
+          - type: string
+            enum:
+            - runtime
+            - env
+            - unset
+          - type: 'null'
+          title: Source
+        fingerprint:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Fingerprint
+      type: object
+      required:
+      - name
+      title: DeploymentProvider
+    DeploymentSetting:
+      properties:
+        name:
+          type: string
+          title: Name
+        env_class:
+          type: integer
+          enum:
+          - 1
+          - 2
+          title: Env Class
+          description: 'Its class in .env.example: 1 bootstrap, 2 posture'
+        value:
+          anyOf:
+          - type: string
+          - type: integer
+          - type: number
+          - type: boolean
+          - type: 'null'
+          title: Value
+          description: The value the backend runs with; a URL without its userinfo,
+            query or fragment
+        source:
+          type: string
+          enum:
+          - env
+          - default
+          title: Source
+          description: 'env: set in the process environment or .env, compose''s defaults
+            included; default: the settings model''s own'
+        hint:
+          type: string
+          title: Hint
+          description: Where to change it
+      type: object
+      required:
+      - name
+      - env_class
+      - source
+      - hint
+      title: DeploymentSetting
+      description: 'One allowlisted name, as the backend reads it: never a secret.'
+    DeploymentTransport:
+      properties:
+        scheme:
+          type: string
+          title: Scheme
+        host:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Host
+      type: object
+      required:
+      - scheme
+      title: DeploymentTransport
+      description: The request's own scheme and host (D43), never a variable's.
+    DeploymentView:
+      properties:
+        version:
+          type: string
+          title: Version
+        license:
+          type: string
+          title: License
+        source_url:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source Url
+          description: Where the source of this version is, stripped as a URL
+        demo:
+          type: boolean
+          title: Demo
+        stub:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Stub
+          description: Keyless mode, as the gateway's /healthz says; null when it
+            is down
+        gateway:
+          $ref: '#/components/schemas/DeploymentGateway'
+        settings:
+          items:
+            $ref: '#/components/schemas/DeploymentSetting'
+          type: array
+          title: Settings
+        otlp_headers:
+          items:
+            $ref: '#/components/schemas/DeploymentHeader'
+          type: array
+          title: Otlp Headers
+        transport:
+          $ref: '#/components/schemas/DeploymentTransport'
+      type: object
+      required:
+      - version
+      - license
+      - demo
+      - gateway
+      - settings
+      - otlp_headers
+      - transport
+      title: DeploymentView
+      description: '``GET /admin/deployment``: the posture read-only, each value with
+        its
+
+        source (K9-04). An allowlist of names: never a secret, the environment
+
+        or a URL''s userinfo or query.'
+    EditStatementRequest:
+      properties:
+        edited_statement:
+          type: string
+          title: Edited Statement
+      type: object
+      required:
+      - edited_statement
+      title: EditStatementRequest
+    FeedbackAggregate:
+      properties:
+        total:
+          type: integer
+          title: Total
+        positive:
+          type: integer
+          title: Positive
+        negative:
+          type: integer
+          title: Negative
+        positive_rate:
+          type: number
+          title: Positive Rate
+        per_section:
+          items:
+            $ref: '#/components/schemas/FeedbackAggregateSection'
+          type: array
+          title: Per Section
+        recent_negatives:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Recent Negatives
+      type: object
+      required:
+      - total
+      - positive
+      - negative
+      - positive_rate
+      - per_section
+      - recent_negatives
+      title: FeedbackAggregate
+    FeedbackAggregateSection:
+      properties:
+        section_type:
+          type: string
+          title: Section Type
+        positive:
+          type: integer
+          title: Positive
+        negative:
+          type: integer
+          title: Negative
+        positive_rate:
+          type: number
+          title: Positive Rate
+      type: object
+      required:
+      - section_type
+      - positive
+      - negative
+      - positive_rate
+      title: FeedbackAggregateSection
+    FeedbackSubmit:
+      properties:
+        run_id:
+          type: string
+          format: uuid
+          title: Run Id
+          description: The run the feedback is about. `case_id` is accepted as the
+            deprecated pre-1.0 spelling for one release (blueprint S1 / decision L18)
+            and stops being accepted at v1.1.
+        section_type:
+          type: string
+          maxLength: 30
+          minLength: 1
+          title: Section Type
+        citation_id:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Citation Id
+        rating:
+          type: string
+          enum:
+          - positive
+          - negative
+          title: Rating
+        comment:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Comment
+      type: object
+      required:
+      - run_id
+      - section_type
+      - rating
+      title: FeedbackSubmit
+    GoogleLoginRequest:
+      properties:
+        credential:
+          type: string
+          title: Credential
+      type: object
+      required:
+      - credential
+      title: GoogleLoginRequest
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    IssuedAgentKey:
+      properties:
+        agent_id:
+          type: string
+          title: Agent Id
+        key:
+          type: string
+          title: Key
+        key_prefix:
+          type: string
+          title: Key Prefix
+      type: object
+      required:
+      - agent_id
+      - key
+      - key_prefix
+      title: IssuedAgentKey
+      description: '``201``: the value, in this response and nowhere else, ever again.'
+    LoginRequest:
+      properties:
+        email:
+          type: string
+          format: email
+          title: Email
+        password:
+          type: string
+          title: Password
+      type: object
+      required:
+      - email
+      - password
+      title: LoginRequest
+    MicrosoftLoginRequest:
+      properties:
+        code:
+          type: string
+          title: Code
+        redirect_uri:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Redirect Uri
+      type: object
+      required:
+      - code
+      title: MicrosoftLoginRequest
+    PiiRedactionPreview:
+      properties:
+        redacted_content:
+          type: string
+          title: Redacted Content
+        redactions_applied:
+          items:
+            $ref: '#/components/schemas/RedactionEntry'
+          type: array
+          title: Redactions Applied
+        original_size_bytes:
+          type: integer
+          title: Original Size Bytes
+      type: object
+      required:
+      - redacted_content
+      - redactions_applied
+      - original_size_bytes
+      title: PiiRedactionPreview
+    ProgressResponse:
+      properties:
+        phase:
+          type: integer
+          title: Phase
+        steps:
+          items:
+            $ref: '#/components/schemas/StepProgress'
+          type: array
+          title: Steps
+        phase_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Phase Name
+      type: object
+      required:
+      - phase
+      - steps
+      title: ProgressResponse
+    ProviderEntry:
+      properties:
+        name:
+          type: string
+          enum:
+          - openai
+          - anthropic
+          - google
+          title: Name
+          description: One per provider-key variable of the gateway (K7-02)
+        aliases:
+          items:
+            type: string
+          type: array
+          title: Aliases
+          description: The provider spellings a step may name that this key serves;
+            empty until the gateway has reported
+        source:
+          anyOf:
+          - type: string
+            enum:
+            - runtime
+            - env
+            - unset
+          - type: 'null'
+          title: Source
+          description: 'runtime: a key pasted here, which the gateway holds and serves;
+            env: the gateway''s environment serves this provider; unset: neither;
+            null until the gateway reports'
+        fingerprint:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Fingerprint
+          description: A keyed digest of a stored key under the gateway's store key,
+            12 hex characters — the gateway's to compute; null unless source is runtime
+        set_by:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Set By
+          description: Who last set the stored row
+        set_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Set At
+          description: When the stored row was last set
+        row:
+          anyOf:
+          - type: string
+            enum:
+            - runtime
+            - pending
+            - rejected
+          - type: 'null'
+          title: Row
+          description: 'The stored row''s state: runtime (in effect), pending (the
+            gateway has not processed it yet), rejected (it will not open; the environment
+            serves meanwhile); null with no row'
+        reason:
+          anyOf:
+          - type: string
+            enum:
+            - unsealable
+            - unopenable
+          - type: 'null'
+          title: Reason
+          description: 'Why a row was rejected: unsealable (the blob does not open
+            under the gateway''s sealing key for this provider), unopenable (a stored
+            row no configured store key opens)'
+      type: object
+      required:
+      - name
+      title: ProviderEntry
+      description: One provider-key name as the gateway reports it — never a key.
+    ProviderKeyAccepted:
+      properties:
+        name:
+          type: string
+          title: Name
+        row:
+          type: string
+          const: pending
+          title: Row
+          default: pending
+      type: object
+      required:
+      - name
+      title: ProviderKeyAccepted
+      description: '``202``: stored for the gateway to adopt; only it can fingerprint
+        the key.'
+    ProviderKeyUpdate:
+      properties:
+        sealed:
+          type: string
+          title: Sealed
+          description: base64 of the RSA-OAEP-SHA256 ciphertext, label librerun-provider-key:v1:<name>
+            — 384 bytes decoded
+      type: object
+      required:
+      - sealed
+      title: ProviderKeyUpdate
+      description: 'A provider key, sealed in the browser to the gateway''s public
+        key.
+
+        Never the key itself: the backend cannot open this, and refuses a body
+
+        that is not one 3072-bit OAEP block.'
+    ProvidersStatus:
+      properties:
+        reported:
+          type: boolean
+          title: Reported
+          description: Whether the gateway has written its status row
+        stub:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Stub
+          description: Keyless mode, as the gateway reported it
+        gateway_version:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Gateway Version
+        updated_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Updated At
+          description: When the gateway last wrote its row
+        public_key_pem:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Public Key Pem
+          description: 'The public key a provider key is sealed to in the browser
+            (RSA-OAEP, SHA-256, 3072 bits); null while the gateway''s store key is
+            blank. Its fingerprint, SHA256: over the SPKI DER, is computed by each
+            reader and compared with the gateway''s boot log (D34)'
+        providers:
+          items:
+            $ref: '#/components/schemas/ProviderEntry'
+          type: array
+          title: Providers
+      type: object
+      required:
+      - reported
+      - providers
+      title: ProvidersStatus
+      description: '``GET /admin/providers``: what the gateway holds, from the row
+        it writes.'
+    RedactionEntry:
+      properties:
+        original_placeholder:
+          type: string
+          title: Original Placeholder
+        pii_type:
+          type: string
+          title: Pii Type
+        confidence:
+          type: number
+          title: Confidence
+      type: object
+      required:
+      - original_placeholder
+      - pii_type
+      - confidence
+      title: RedactionEntry
+    ReportCreate:
+      properties:
+        format:
+          type: string
+          title: Format
+          default: html
+      type: object
+      title: ReportCreate
+    RotatedAgentKey:
+      properties:
+        agent_id:
+          type: string
+          title: Agent Id
+        key:
+          type: string
+          title: Key
+        key_prefix:
+          type: string
+          title: Key Prefix
+        grace_hours:
+          type: integer
+          title: Grace Hours
+      type: object
+      required:
+      - agent_id
+      - key
+      - key_prefix
+      - grace_hours
+      title: RotatedAgentKey
+      description: The new current key; the previous one works for ``grace_hours``.
+    RunCreatedResponse:
+      properties:
+        run_id:
+          type: string
+          format: uuid
+          title: Run Id
+        run_number:
+          type: string
+          title: Run Number
+        status:
+          type: string
+          title: Status
+        case_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Case Id
+          description: 'Deprecated duplicate of `run_id` (LibreRun speaks `run`, blueprint
+            S1 / decision L18): always identical to `run_id`, emitted for one release
+            and removed at v1.1. Read `run_id` instead.'
+          deprecated: true
+        case_number:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Case Number
+          description: 'Deprecated duplicate of `run_number` (LibreRun speaks `run`,
+            blueprint S1 / decision L18): always identical to `run_number`, emitted
+            for one release and removed at v1.1. Read `run_number` instead.'
+          deprecated: true
+      type: object
+      required:
+      - run_id
+      - run_number
+      - status
+      title: RunCreatedResponse
+    RunDetail:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        run_number:
+          type: string
+          title: Run Number
+        title:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Title
+        approval_summary:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Approval Summary
+        vendor_a:
+          anyOf:
+          - $ref: '#/components/schemas/VendorInput'
+          - type: 'null'
+        vendor_b:
+          anyOf:
+          - $ref: '#/components/schemas/VendorInput'
+          - type: 'null'
+        vendor_a_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Vendor A Name
+        vendor_b_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Vendor B Name
+        problem_summary:
+          type: string
+          title: Problem Summary
+          description: 'Deprecated (LibreRun blueprint S2): `title` replaces it; kept
+            identical for one release and removed at v1.1. Read `title` instead.'
+          default: ''
+          deprecated: true
+        severity:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Severity
+        status:
+          type: string
+          title: Status
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        use_case:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Use Case
+        problem_statement:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Problem Statement
+          description: 'Deprecated (LibreRun blueprint S2): `title` replaces it; kept
+            identical for one release and removed at v1.1. Read `title` instead.'
+          deprecated: true
+        impact_statement:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Impact Statement
+        refined_problem_statement:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Refined Problem Statement
+          description: 'Deprecated (LibreRun blueprint S2): `approval_summary` replaces
+            it; kept identical for one release and removed at v1.1. Read `approval_summary`
+            instead.'
+          deprecated: true
+        agent_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Agent Id
+        user_inputs:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: User Inputs
+        output_mode:
+          type: string
+          title: Output Mode
+          default: html_report
+        structured_output:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Structured Output
+        feedback_sections:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Feedback Sections
+        trace_url:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Trace Url
+        error_code:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error Code
+        error_message:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error Message
+        case_number:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Case Number
+          description: 'Deprecated duplicate of `run_number` (LibreRun speaks `run`,
+            blueprint S1 / decision L18): always identical to `run_number`, emitted
+            for one release and removed at v1.1. Read `run_number` instead.'
+          deprecated: true
+      type: object
+      required:
+      - id
+      - run_number
+      - severity
+      - status
+      - created_at
+      - updated_at
+      title: RunDetail
+    RunListResponse:
+      properties:
+        runs:
+          items:
+            $ref: '#/components/schemas/RunSummary'
+          type: array
+          title: Runs
+        total:
+          type: integer
+          title: Total
+        page:
+          type: integer
+          title: Page
+        per_page:
+          type: integer
+          title: Per Page
+      type: object
+      required:
+      - runs
+      - total
+      - page
+      - per_page
+      title: RunListResponse
+    RunSummary:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        run_number:
+          type: string
+          title: Run Number
+        title:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Title
+        vendor_a_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Vendor A Name
+        vendor_b_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Vendor B Name
+        problem_summary:
+          type: string
+          title: Problem Summary
+          description: 'Deprecated (LibreRun blueprint S2): `title` replaces it; kept
+            identical for one release and removed at v1.1. Read `title` instead.'
+          default: ''
+          deprecated: true
+        severity:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Severity
+        status:
+          type: string
+          title: Status
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        agent_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Agent Id
+        case_number:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Case Number
+          description: 'Deprecated duplicate of `run_number` (LibreRun speaks `run`,
+            blueprint S1 / decision L18): always identical to `run_number`, emitted
+            for one release and removed at v1.1. Read `run_number` instead.'
+          deprecated: true
+      type: object
+      required:
+      - id
+      - run_number
+      - severity
+      - status
+      - created_at
+      - updated_at
+      title: RunSummary
+    SecretRow:
+      properties:
+        set:
+          type: boolean
+          title: Set
+        fingerprint:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Fingerprint
+        updated_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Updated At
+        updated_by:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Updated By
+        last_used_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Last Used At
+      type: object
+      required:
+      - set
+      title: SecretRow
+      description: 'One place a value may come from. ``fingerprint`` is a keyed,
+
+        12-character digest under the store key, ``None`` while unset and for a
+
+        row no configured key opens; ``updated_by`` of the default row is shown
+
+        to platform admins alone. The environment row carries ``set`` alone:
+
+        the platform neither fingerprints nor stamps it.'
+    SecretSettingState:
+      properties:
+        set:
+          type: boolean
+          title: Set
+          description: True when the encrypted secrets store holds a row for this
+            setting (source runtime or unreadable); updated_at and updated_by describe
+            that row
+        source:
+          type: string
+          enum:
+          - runtime
+          - env
+          - unset
+          - unreadable
+          title: Source
+          description: 'runtime: the store''s row, which a configured key opens; env:
+            no row, the environment variable''s value applies; unset: neither; unreadable:
+            the store holds a row no configured key opens (a lost or rotated key)
+            and the environment applies meanwhile — Replace re-encrypts it under the
+            current key, or Clear it'
+        fingerprint:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Fingerprint
+          description: A keyed digest of the value under the store key, 12 hex characters;
+            null unless source is runtime
+        updated_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Updated At
+          description: When the row was last set
+        updated_by:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Updated By
+          description: Who last set the row
+      type: object
+      required:
+      - set
+      - source
+      title: SecretSettingState
+      description: 'What the API shows of a secret setting (K6, L31): where its value
+
+        comes from and a fingerprint — never the value.'
+    SettingResponse:
+      properties:
+        key:
+          type: string
+          title: Key
+          description: Unique setting identifier
+        value:
+          title: Value
+          description: Effective value (DB override or default); always null for a
+            secret
+        default_value:
+          title: Default Value
+          description: Value used when no DB override exists; always null for a secret
+        value_type:
+          type: string
+          enum:
+          - string_list
+          - int
+          - bool
+          - string
+          - secret
+          title: Value Type
+          description: Expected value shape; drives UI editor selection
+        description:
+          type: string
+          title: Description
+          description: Human-readable explanation
+        is_default:
+          type: boolean
+          title: Is Default
+          description: True when no DB override is set
+        updated_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Updated At
+          description: Timestamp of the last override write
+        updated_by:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Updated By
+          description: User who last wrote the override
+        secret:
+          anyOf:
+          - $ref: '#/components/schemas/SecretSettingState'
+          - type: 'null'
+          description: 'A secret setting''s state (write-only: never its value); null
+            for other types'
+      type: object
+      required:
+      - key
+      - value
+      - default_value
+      - value_type
+      - description
+      - is_default
+      title: SettingResponse
+      description: Effective value of a runtime-tunable application setting.
+    SettingUpdate:
+      properties:
+        value:
+          title: Value
+          description: New value; coerced to the setting's declared type
+      type: object
+      required:
+      - value
+      title: SettingUpdate
+      description: Payload for updating a single app setting.
+    StepProgress:
+      properties:
+        step_id:
+          type: string
+          title: Step Id
+        status:
+          type: string
+          enum:
+          - pending
+          - running
+          - complete
+          - skipped
+          - error
+          title: Status
+        duration_ms:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Duration Ms
+        detail:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Detail
+        model:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Model
+      type: object
+      required:
+      - step_id
+      - status
+      title: StepProgress
+    TlsCertificate:
+      properties:
+        subject:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Subject
+        issuer:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Issuer
+        names:
+          items:
+            type: string
+          type: array
+          title: Names
+          description: Its subject alternative names
+        not_before:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Not Before
+        not_after:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Not After
+        sha256:
+          type: string
+          title: Sha256
+          description: SHA-256 of the certificate's DER, hex
+      type: object
+      required:
+      - sha256
+      title: TlsCertificate
+      description: One certificate's public facts — never a key.
+    TlsChoice:
+      properties:
+        kind:
+          type: string
+          enum:
+          - ca
+          - files
+          - acme
+          title: Kind
+        by:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: By
+          description: Who chose, by user id
+        by_email:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: By Email
+          description: Who chose, in this tenant
+        at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: At
+          description: When
+      type: object
+      required:
+      - kind
+      title: TlsChoice
+      description: 'What a platform admin chose on this page, which wins over the
+
+        environment until "Use the environment''s setting".'
+    TlsEnvironment:
+      properties:
+        variable:
+          type: string
+          enum:
+          - LIBRERUN_TLS
+          - LIBRERUN_TLS_CA
+          title: Variable
+        ca:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Ca
+      type: object
+      required:
+      - variable
+      title: TlsEnvironment
+      description: 'What the environment selects: LIBRERUN_TLS, or LIBRERUN_TLS_CA''s
+        CA.'
+    TlsIssuer:
+      properties:
+        kind:
+          type: string
+          enum:
+          - internal
+          - acme
+          - files
+          title: Kind
+        ca:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Ca
+          description: 'internal: the CA''s issuer id'
+        email:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Email
+          description: 'acme: the account e-mail'
+      type: object
+      required:
+      - kind
+      title: TlsIssuer
+    TlsRoot:
+      properties:
+        subject:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Subject
+        issuer:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Issuer
+        names:
+          items:
+            type: string
+          type: array
+          title: Names
+          description: Its subject alternative names
+        not_before:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Not Before
+        not_after:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Not After
+        sha256:
+          type: string
+          title: Sha256
+          description: SHA-256 of the certificate's DER, hex
+        ca:
+          type: string
+          title: Ca
+          description: 'The CA''s issuer id: local (the one the edge generated), env-<12
+            hex> (LIBRERUN_TLS_CA''s) or loaded-<12 hex> (loaded on this page)'
+        name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Name
+          description: The CA's name, as the edge reports it
+      type: object
+      required:
+      - sha256
+      - ca
+      title: TlsRoot
+      description: The root the edge issues from, when its issuer is its own CA.
+    TlsStatus:
+      properties:
+        edge:
+          type: string
+          enum:
+          - 'on'
+          - 'off'
+          title: Edge
+          description: 'off: edge-control did not answer, so the tls profile is off
+            and this is plain HTTP'
+        site:
+          items:
+            type: string
+          type: array
+          title: Site
+          description: The names the edge answers for
+        issuer:
+          anyOf:
+          - $ref: '#/components/schemas/TlsIssuer'
+          - type: 'null'
+        root:
+          anyOf:
+          - $ref: '#/components/schemas/TlsRoot'
+          - type: 'null'
+        leaf:
+          anyOf:
+          - $ref: '#/components/schemas/TlsCertificate'
+          - type: 'null'
+          description: The certificate the edge serves, read by a handshake
+        source:
+          anyOf:
+          - type: string
+            enum:
+            - environment
+            - ui
+          - type: 'null'
+          title: Source
+          description: 'environment: no choice is recorded here; ui: a choice made
+            on this page'
+        choice:
+          anyOf:
+          - $ref: '#/components/schemas/TlsChoice'
+          - type: 'null'
+        environment:
+          anyOf:
+          - $ref: '#/components/schemas/TlsEnvironment'
+          - type: 'null'
+        why:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Why
+          description: Why the source in effect is the one in effect
+        needs:
+          items:
+            type: string
+            enum:
+            - edge_off
+            - edge_restart
+            - trust_root
+            - root_changed
+            - files_ending
+            - ca_ending
+            - acme_requirements
+          type: array
+          title: Needs
+          description: What the admin must do next, each with its action
+        acknowledged_root:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Acknowledged Root
+          description: The SHA-256 of the root last acknowledged as trusted (tls.last_root)
+      type: object
+      required:
+      - edge
+      title: TlsStatus
+      description: '``GET /admin/tls``: what the edge serves and what it needs next
+        (L43).
+
+        Public material alone: no key is ever in it (L42).'
+    TokenResponse:
+      properties:
+        access_token:
+          type: string
+          title: Access Token
+        token_type:
+          type: string
+          title: Token Type
+          default: bearer
+      type: object
+      required:
+      - access_token
+      title: TokenResponse
+    UserEntry:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        email:
+          type: string
+          title: Email
+        display_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Display Name
+        role:
+          type: string
+          title: Role
+        auth_provider:
+          type: string
+          title: Auth Provider
+        is_active:
+          type: boolean
+          title: Is Active
+        last_sign_in:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Last Sign In
+      type: object
+      required:
+      - id
+      - email
+      - display_name
+      - role
+      - auth_provider
+      - is_active
+      - last_sign_in
+      title: UserEntry
+    UserInvite:
+      properties:
+        email:
+          type: string
+          title: Email
+        role:
+          type: string
+          enum:
+          - admin
+          - customer
+          title: Role
+          default: customer
+      type: object
+      required:
+      - email
+      title: UserInvite
+    UserProfile:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        email:
+          type: string
+          title: Email
+        role:
+          type: string
+          title: Role
+        tenant_id:
+          type: string
+          format: uuid
+          title: Tenant Id
+        display_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Display Name
+        is_platform_admin:
+          type: boolean
+          title: Is Platform Admin
+          description: 'Whether this user administers the deployment: an admin of
+            the tenant whose slug is PLATFORM_TENANT_SLUG. A display hint for the
+            UI; every route keeps its own gate.'
+      type: object
+      required:
+      - id
+      - email
+      - role
+      - tenant_id
+      - is_platform_admin
+      title: UserProfile
+    UserUpdate:
+      properties:
+        role:
+          anyOf:
+          - type: string
+            enum:
+            - admin
+            - customer
+          - type: 'null'
+          title: Role
+        is_active:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Is Active
+      type: object
+      title: UserUpdate
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+        input:
+          title: Input
+        ctx:
+          type: object
+          title: Context
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError
+    VendorInput:
+      properties:
+        name:
+          type: string
+          title: Name
+        product:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Product
+        feature:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Feature
+        observation:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Observation
+      type: object
+      required:
+      - name
+      title: VendorInput
+  securitySchemes:
+    HTTPBearer:
+      type: http
+      scheme: bearer

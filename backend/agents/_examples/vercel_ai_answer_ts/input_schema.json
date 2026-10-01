@@ -1,0 +1,30 @@
+{
+  "type": "object",
+  "title": "Ask a question",
+  "required": [
+    "question"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "question": {
+      "type": "string",
+      "title": "Question",
+      "description": "What to ask. It is redacted by the intake pipeline before the container sees it.",
+      "minLength": 1,
+      "maxLength": 2000,
+      "x-ui-widget": "textarea",
+      "x-pii": true
+    },
+    "service": {
+      "type": "string",
+      "title": "Service in question",
+      "description": "Offered to the model through the one tool this agent declares; the container resolves it from its own table and reaches nothing off its network.",
+      "enum": [
+        "checkout",
+        "payments",
+        "search",
+        "notifications"
+      ]
+    }
+  }
+}

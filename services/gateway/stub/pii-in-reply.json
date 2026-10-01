@@ -1,0 +1,16 @@
+{
+  "_comment": "A reply that deliberately carries personal data, in its text and inside a tool call's arguments. The gateway does NOT rewrite a completion - rewriting a model's answer under the agent's feet would change structured outputs and tool-call arguments - but content reaches telemetry only through the walker, so the LLM span for this reply must show placeholders where these values are. That is what this script is for: a test the telemetry walk cannot pass by not looking. Note the walker's boundary rule skips LOCATION and DATE_TIME (pii_service.BOUNDARY_SKIP_ENTITIES, blueprint S4), so a place name in a reply is not a placeholder and nothing here relies on one being.",
+  "content": "Escalate to the on-call engineer at oncall@example.com, phone 415-555-0132.",
+  "tool_calls": [
+    {
+      "id": "call_pii_1",
+      "function": {
+        "name": "notify",
+        "arguments": {
+          "email": "oncall@example.com",
+          "phone": "415-555-0132"
+        }
+      }
+    }
+  ]
+}

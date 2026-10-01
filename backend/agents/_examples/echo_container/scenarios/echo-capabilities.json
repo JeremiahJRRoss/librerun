@@ -1,0 +1,12 @@
+{
+  "name": "Demo: the chassis answers a container over MCP",
+  "description": "The other half of what a container agent gets from the platform. The echo card shows an agent being invoked; this one shows it calling BACK. The agent asks the chassis to redact a line of text (`ctx.pii.redact`, the `pii` grant), and the answer comes from the same pipeline intake runs — same recognizers, same placeholders — over a JSON-RPC endpoint the chassis advertises per run as `run.mcp.url`, authenticated with the same bearer the invocation carried. Submitted through the UI the text you type is already a placeholder by the time the agent sees it, because intake redacted it on the way in: that is the point of the `x-pii` marking, and what comes back is the second pass over the first pass's output. Driven straight on the Run Contract — by the container battery, or by `python -m adapter_kit.run_contract` — the handler gets the text as sent, which is what makes the callback observable at all. It reads its own settings as well (`ctx.config.settings()`, the `config_get` tool, which needs no grant): the ones its manifest declares, as this tenant set them on the agent page's Settings tab. It asks the model one question too, so this sample produces a costed LLM span like every other card's.",
+  "user_inputs": {
+    "message": "Ask the chassis to redact something, then echo it back.",
+    "mood": "deadpan",
+    "redact": "Escalate to Dana Whitfield at pii.fixture@example.com or 415-555-0147.",
+    "show_settings": true,
+    "fetch_secret": true,
+    "ask_model": "In one sentence: why does a container agent ask the chassis to redact text?"
+  }
+}

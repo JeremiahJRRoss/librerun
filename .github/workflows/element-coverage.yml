@@ -1,0 +1,249 @@
+# A comprehension's ELEMENT EXPRESSION is not covered by the line that
+# holds it (blueprint S5, gap H14).
+#
+# `GET /runs/{id}/progress` built its rows with
+# `[_step(k, v) for k, v in raw.items()]` and `_step` was deleted by a
+# bad revert. That is a NameError — a 500 for every run with any
+# progress row — and the backend suite passed 1232 with it in the tree,
+# because the only test driving that endpoint asserted the progress
+# hash was EMPTY. The comprehension's line ran; its body never did.
+#
+# Line coverage cannot see this and neither can a suite that is green:
+# the test PASSED. So the check is a mutation — rename the call in the
+# element expression to a name that does not exist and see whether
+# anything notices.
+name: element-coverage
+
+on:
+  # The two ways the defect gets in: a handler gains a comprehension
+  # nothing drives with members, or the test that did drive it stops.
+  #
+  # Nothing else needs to be here, and that is an argument rather than
+  # an omission. A change elsewhere that quietly empties one of these
+  # collections turns the covering tests RED — they assert on the rows —
+  # so it is caught by unit-suites, not missed by this. The uncovered
+  # state can only be reached by writing a handler or by writing a test,
+  # which is what these two patterns are.
+  pull_request:
+    paths:
+      - "backend/app/routers/**"
+      - "backend/tests/**"
+      - "scripts/element_expression_coverage.py"
+      - ".github/workflows/element-coverage.yml"
+      # What this job's own setup READS, which no rule about where the
+      # defect comes from would ever reach. The census in
+      # test_no_workflow_runs_a_file_its_own_paths_filter_cannot_see
+      # named all four: a pull request bumping a lock file or editing
+      # the schema changes what this job runs, and without these it
+      # would merge without the job running once.
+      - "backend/requirements.lock.txt"
+      - "backend/adapters/requirements.lock.txt"
+      - "backend/adapters/build-constraints.txt"
+      - "backend/db/schema.sql"
+      # `python -m alembic` searches the working directory before
+      # site-packages, so a file committed at either path would capture
+      # the step — and the commit adding it would not run this job.
+      - "backend/alembic.py"
+      - "backend/alembic/__init__.py"
+      # ...and what alembic READS, which the two above do not cover and
+      # no rule about shadowing would ever reach. `python -m alembic
+      # upgrade head` loads `backend/alembic.ini`, whose
+      # `script_location` points at `backend/alembic`, so `env.py` and
+      # every revision there decide what schema the suite runs against.
+      # The two names above guard against a file PRETENDING to be
+      # alembic; these guard against alembic's own inputs changing
+      # (Codex round 19). Measured: the other two workflows that run
+      # alembic select `backend/**` and already cover both.
+      - "backend/alembic.ini"
+      - "backend/alembic/**"
+      # The same hazard one level in, which that census cannot see: the
+      # checker runs `python -m pytest` with `backend` as its working
+      # directory, and that invocation is inside the script rather than
+      # in a `run:` step here. Listed by hand because the derived rule
+      # does not reach it, and said out loud because a hand-kept list is
+      # the thing this repository keeps replacing with a test.
+      - "backend/pytest.py"
+      - "backend/pytest/__init__.py"
+      # And the OTHER half of that hazard, which the first version of
+      # this file missed while listing the first: pytest resolves its
+      # configuration by walking UP from the invocation directory, so a
+      # file committed at the repository root takes effect for
+      # `cd backend && pytest` and can change what is collected, which
+      # plugins load, and therefore every verdict this job reports —
+      # while the job does not run on the commit that added it. The
+      # seven names are pytest's own `config_names`, read out of
+      # `_pytest.config.findpaths` rather than retyped; `conftest.py` is
+      # the eighth, because a root ini moves rootdir there and is what
+      # makes a root conftest load at all. unit-suites.yml carries the
+      # same list for the same reason (Codex round 2).
+      - "pytest.toml"
+      - ".pytest.toml"
+      - "pytest.ini"
+      - ".pytest.ini"
+      - "pyproject.toml"
+      - "tox.ini"
+      - "setup.cfg"
+      - "conftest.py"
+  push:
+    branches: [main]
+    paths:
+      - "backend/app/routers/**"
+      - "backend/tests/**"
+      - "scripts/element_expression_coverage.py"
+      - ".github/workflows/element-coverage.yml"
+      # What this job's own setup READS, which no rule about where the
+      # defect comes from would ever reach. The census in
+      # test_no_workflow_runs_a_file_its_own_paths_filter_cannot_see
+      # named all four: a pull request bumping a lock file or editing
+      # the schema changes what this job runs, and without these it
+      # would merge without the job running once.
+      - "backend/requirements.lock.txt"
+      - "backend/adapters/requirements.lock.txt"
+      - "backend/adapters/build-constraints.txt"
+      - "backend/db/schema.sql"
+      # `python -m alembic` searches the working directory before
+      # site-packages, so a file committed at either path would capture
+      # the step — and the commit adding it would not run this job.
+      - "backend/alembic.py"
+      - "backend/alembic/__init__.py"
+      # ...and what alembic READS, which the two above do not cover and
+      # no rule about shadowing would ever reach. `python -m alembic
+      # upgrade head` loads `backend/alembic.ini`, whose
+      # `script_location` points at `backend/alembic`, so `env.py` and
+      # every revision there decide what schema the suite runs against.
+      # The two names above guard against a file PRETENDING to be
+      # alembic; these guard against alembic's own inputs changing
+      # (Codex round 19). Measured: the other two workflows that run
+      # alembic select `backend/**` and already cover both.
+      - "backend/alembic.ini"
+      - "backend/alembic/**"
+      # The same hazard one level in, which that census cannot see: the
+      # checker runs `python -m pytest` with `backend` as its working
+      # directory, and that invocation is inside the script rather than
+      # in a `run:` step here. Listed by hand because the derived rule
+      # does not reach it, and said out loud because a hand-kept list is
+      # the thing this repository keeps replacing with a test.
+      - "backend/pytest.py"
+      - "backend/pytest/__init__.py"
+      # And the OTHER half of that hazard, which the first version of
+      # this file missed while listing the first: pytest resolves its
+      # configuration by walking UP from the invocation directory, so a
+      # file committed at the repository root takes effect for
+      # `cd backend && pytest` and can change what is collected, which
+      # plugins load, and therefore every verdict this job reports —
+      # while the job does not run on the commit that added it. The
+      # seven names are pytest's own `config_names`, read out of
+      # `_pytest.config.findpaths` rather than retyped; `conftest.py` is
+      # the eighth, because a root ini moves rootdir there and is what
+      # makes a root conftest load at all. unit-suites.yml carries the
+      # same list for the same reason (Codex round 2).
+      - "pytest.toml"
+      - ".pytest.toml"
+      - "pytest.ini"
+      - ".pytest.ini"
+      - "pyproject.toml"
+      - "tox.ini"
+      - "setup.cfg"
+      - "conftest.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  element-expressions:
+    runs-on: ubuntu-latest
+    # Every candidate is mutated at once: one control run, then one run
+    # per containment depth — two for the 24 element expressions in
+    # `backend/app/routers` today. A candidate no batch settles is re-run
+    # alone, and not only when there is something to report: a test that
+    # fails at the first mutated element it reaches never reaches the
+    # others, so five of the 24 go alone on a green head. Eight suite
+    # runs of 6½ to 8½ minutes here: 53 minutes on one green head, and
+    # cancelled at 60 on the next. 120 holds the eight and a handful of
+    # findings without the timeout becoming the thing that reports them.
+    timeout-minutes: 120
+    # The same services and the same setup as unit-suites, and not for
+    # tidiness: the checker REFUSES to report anything unless its control
+    # run is green, so a job missing the database would fail loudly here
+    # instead of reporting every element expression covered by a suite
+    # that could not run.
+    services:
+      postgres:
+        image: docker.io/library/postgres:16@sha256:1a6ab3f5345eb6dbe04a1349529caabdb0ab09293a09590fad07b2246bfa4b54
+        env:
+          POSTGRES_USER: librerun
+          POSTGRES_PASSWORD: ci_only_throwaway
+          POSTGRES_DB: librerun
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U librerun -d librerun"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+      redis:
+        image: docker.io/valkey/valkey:8-alpine@sha256:081c2f5cb575efc901aa80ff9cdbd1ec6a301682fd35e1ebb4b0990a4a4a8507
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql+asyncpg://librerun:ci_only_throwaway@localhost:5432/librerun
+      PGURL: postgresql://librerun:ci_only_throwaway@localhost:5432/librerun
+      REDIS_URL: redis://localhost:6379/0
+      # A test that SKIPS cannot catch a mutation. Without this the
+      # database-backed tests skip, the control run is still green
+      # because skips are not failures, and every candidate comes back
+      # UNCOVERED — a guard that reports a finding by not looking is
+      # the same defect as one that reports success that way.
+      LIBRERUN_REQUIRE_DB: "1"
+      LOG_STDERR_ENABLED: "false"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The checker's preflight asks `git diff HEAD` whether the
+          # files it is about to mutate already differ, and refuses if
+          # git cannot answer. A shallow checkout still has HEAD, so
+          # depth 1 is enough — but a checkout with no history at all
+          # would make that preflight the thing it exists to prevent.
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.lock.txt
+            backend/adapters/requirements.lock.txt
+            backend/adapters/build-constraints.txt
+
+      - name: Install the chassis and the adapter
+        # The adapter too, for unit-suites' reason: without it 64 tests
+        # in three modules skip, and a skipped test cannot catch a
+        # mutation.
+        working-directory: backend
+        run: |
+          pip install -r requirements.lock.txt
+          PIP_CONSTRAINT=adapters/build-constraints.txt \
+            pip install -r adapters/requirements.lock.txt
+          PIP_CONSTRAINT=adapters/build-constraints.txt \
+            pip install --no-deps ./adapters
+
+      - name: The adapter must be importable
+        working-directory: backend
+        run: python -c "import langgraph, librerun_langgraph"
+
+      - name: Load the schema the suite expects
+        working-directory: backend
+        run: psql "$PGURL" -v ON_ERROR_STOP=1 -q -f db/schema.sql
+
+      - name: Bring the schema to head
+        working-directory: backend
+        run: python -m alembic upgrade head
+
+      - name: Every route handler's element expression must be evaluated
+        run: python scripts/element_expression_coverage.py

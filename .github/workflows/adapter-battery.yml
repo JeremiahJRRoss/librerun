@@ -1,0 +1,150 @@
+# Blueprint B16: the LangGraph adapter is the batch's primary deliverable,
+# and until this workflow existed nothing in CI ran a single one of its
+# tests.
+#
+# `tests/test_adapter_kit_langgraph.py` opens with
+# `pytest.importorskip("langgraph")`, and LangGraph is deliberately absent
+# from `backend/requirements.txt` — it is an adapter-side dependency the
+# chassis does not ship. Every other workflow installs requirements.txt
+# and nothing else, so the module skipped everywhere it was collected and
+# was never invoked by name anywhere. Regressions in the adapter and its
+# example could merge with a full board of green ticks.
+#
+# So this job installs the adapter the way the quickstart tells a user to
+# (`pip install ./backend/adapters`, which pulls LangGraph in through the
+# adapter's own pyproject) and runs the half of the battery that needs it.
+# The framework-agnostic half stays in chassis-zero-agents.yml, in an
+# environment with no adapter at all — the two jobs are the two halves of
+# one deliverable and neither substitutes for the other.
+name: adapter-battery
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - ".github/workflows/adapter-battery.yml"
+      # Root-level pytest configuration, which no derived rule can
+      # reach: the dependency guard below demands coverage for files
+      # that EXIST, and the hazard here is a file's ADDITION. pytest
+      # resolves its configfile by walking UP from the invocation
+      # directory, so one added at the repo root takes effect for
+      # `cd backend && pytest` while matching no pattern above.
+      # Measured: a root pytest.ini setting `python_files` takes the
+      # backend suite from 1051 collected to 0 — and the job that
+      # would have caught it does not run, on the pull request or on
+      # the push to main. The seven filenames are pytest's own
+      # `config_names`, read out of its compiled code rather than
+      # retyped (Codex round 14). `conftest.py` is the eighth: adding
+      # a root ini moves rootdir from backend/ to the repo root, which
+      # is what makes a root conftest load at all. Measured both ways,
+      # against a conftest known to load, because the first attempt
+      # said "neither" and the positive control said the attempt was
+      # broken.
+      - "pytest.toml"
+      - ".pytest.toml"
+      - "pytest.ini"
+      - ".pytest.ini"
+      - "pyproject.toml"
+      - "tox.ini"
+      - "setup.cfg"
+      - "conftest.py"
+      # The shared "the suite RAN" assertion this job now calls. It
+      # lives outside every pattern above, so without this line a pull
+      # request weakening the one rule all these jobs rely on would skip
+      # them all and merge unexercised — the same trap round 3 found in
+      # unit-suites when the assertion was extracted from it.
+      - "scripts/assert_suite_ran.py"
+  pull_request:
+    paths:
+      - "backend/**"
+      - ".github/workflows/adapter-battery.yml"
+      # Root-level pytest configuration — see the push half above.
+      - "pytest.toml"
+      - ".pytest.toml"
+      - "pytest.ini"
+      - ".pytest.ini"
+      - "pyproject.toml"
+      - "tox.ini"
+      - "setup.cfg"
+      - "conftest.py"
+      - "scripts/assert_suite_ran.py"
+
+# No job here needs the token for more than reading the checkout (R11,
+# scripts/check_no_publication.py: a workflow names its permissions).
+permissions:
+  contents: read
+
+jobs:
+  langgraph-adapter:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/adapters/pyproject.toml
+
+      - name: Install the chassis and the adapter
+        # Two separate installs on purpose. requirements.txt brings the
+        # chassis and pytest; `./adapters` brings LangGraph via the
+        # adapter's own dependency list, so this job proves the packaging
+        # the quickstart documents actually resolves — not just that some
+        # pinned version of LangGraph exists somewhere.
+        #
+        # Deliberately the RANGES, not the locks, and the one backend job
+        # that stays that way. Every other job installs
+        # requirements.lock.txt so it runs what the image ships; this one
+        # exists to answer the opposite question — does the declared
+        # packaging still resolve against current upstream — and a lock
+        # would answer it by never asking. Do not "fix" it to match.
+        run: |
+          pip install -r requirements.txt
+          pip install ./adapters
+
+      - name: The adapter must be importable
+        # Fails loudly here rather than silently downgrading the suite to
+        # a skip further down.
+        run: python -c "import langgraph, librerun_langgraph"
+
+      - name: The spaCy model Presidio's NER stage needs
+        # Blueprint S4c (gap H15). Not an optimisation and not optional:
+        # since S4c the chassis FAILS CLOSED when the named-entity stage
+        # cannot run — intake, the preview and the upload answer 503 and
+        # the run boundary refuses — so a runner without this model runs
+        # a suite against a platform that is refusing everything.
+        #
+        # Setting LIBRERUN_PII_ALLOW_DEGRADED here instead would turn the
+        # suite green by turning the platform's default posture off, and
+        # this job's largest value is that it exercises the default. It
+        # is also the first time the backend suite has run with stage 3
+        # ACTIVE at all, which is worth more than the download costs.
+        run: |
+          python -m spacy download en_core_web_lg
+          python -c "import spacy; spacy.load('en_core_web_lg')"
+
+      - name: Adapter conformance battery (LangGraph half)
+        run: python -m pytest tests/test_adapter_kit_langgraph.py -q --junitxml=langgraph-suite.xml
+
+      - name: The suite must have RUN, not skipped
+        # The SHARED assertion, not a third inline copy of the rule. This
+        # step used to carry its own: `if tests == 0: sys.exit(...)`. That
+        # is the weaker rule the shared script was written to replace —
+        # any positive count satisfies it, so a narrowed discovery leaving
+        # one clean test passes, which is the hole this batch exists to
+        # close. Two implementations of one rule is how the weaker one
+        # survives unnoticed; scripts/assert_suite_ran.py says so in its
+        # own docstring and this job was the counter-example (Codex round
+        # 16).
+        #
+        # 28 is measured from this job's own CI run on 8450c03, not
+        # locally guessed — though both agree here.
+        run: python3 ../scripts/assert_suite_ran.py langgraph-suite.xml 28 adapter-battery

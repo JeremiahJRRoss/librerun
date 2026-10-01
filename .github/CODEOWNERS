@@ -1,0 +1,42 @@
+# Code owners (blueprint S9; release checklist item 5).
+#
+# GitHub requests a review from the owner of every path a pull request
+# touches. The public repository, github.com/JeremiahJRRoss/librerun,
+# belongs to its maintainer's personal account, which has no teams, so
+# every rule names that one user, @JeremiahJRRoss. The handle is written
+# in by scripts/resolve_public_owner.sh, and a placeholder put back is
+# refused: `scripts/prepare_public_repo.sh` will not prepare a tree that
+# carries one unless told to out loud.
+#
+# Where that user cannot review, in any repository but the public one,
+# GitHub ignores these lines: they route nowhere and block nothing.
+
+# Everything, unless a later rule wins.
+*                           @JeremiahJRRoss
+
+# The release machinery: a change here changes what a release carries
+# and the checks that stand in its way. None of it publishes (L37).
+/.github/workflows/         @JeremiahJRRoss
+/scripts/prepare_public_repo.sh  @JeremiahJRRoss
+/VERSION                    @JeremiahJRRoss
+
+# The licence, the mark, and the promises made to contributors.
+/LICENSE                    @JeremiahJRRoss
+/NOTICE                     @JeremiahJRRoss
+/TRADEMARKS.md              @JeremiahJRRoss
+/SECURITY.md                @JeremiahJRRoss
+/CODE_OF_CONDUCT.md         @JeremiahJRRoss
+/CONTRIBUTING.md            @JeremiahJRRoss
+
+# The chassis invariants: tenant scoping, the PII boundary, the approval
+# gate, and the one process that holds a provider credential.
+/backend/app/               @JeremiahJRRoss
+/services/gateway/          @JeremiahJRRoss
+/backend/db/schema.sql      @JeremiahJRRoss
+
+# The contract an agent is written against. Changing it changes every
+# agent anyone has written.
+/sdk/                       @JeremiahJRRoss
+/backend/adapter_kit/       @JeremiahJRRoss
+/docs/authoring/Run_Contract_v1.md  @JeremiahJRRoss
+/docs/authoring/Agents_Design.md    @JeremiahJRRoss

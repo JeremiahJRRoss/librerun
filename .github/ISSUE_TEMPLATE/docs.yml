@@ -1,0 +1,45 @@
+name: Documentation problem
+description: A page is wrong, missing, or out of date.
+labels: ["documentation"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Documentation that is wrong is a bug, and it is the bug a newcomer
+        hits first. If a command in a page does not work, that is this form.
+  - type: input
+    id: page
+    attributes:
+      label: Which page
+      description: The path in the repository, and the heading or line if you have it.
+      placeholder: "docs/platform/Install.md, §2 'Fill in the secrets'"
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of problem
+      options:
+        - A command or snippet does not work
+        - It says something that is no longer true
+        - Something is missing entirely
+        - It is confusing or in the wrong order
+        - A link is broken
+    validations:
+      required: true
+  - type: textarea
+    id: detail
+    attributes:
+      label: What it says, and what it should say
+      description: >
+        If a command failed, paste the command and the error. If you worked out
+        the right answer, say what it was — that is the fix, and we will credit
+        you for it.
+    validations:
+      required: true
+  - type: checkboxes
+    id: offer
+    attributes:
+      label: The fix
+      options:
+        - label: I would like to open the pull request for this.

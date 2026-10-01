@@ -1,0 +1,3 @@
+# Playwright's outputs (blueprint S7): the report, traces and the timings
+# CI uploads as an artifact. Never committed.
+results/

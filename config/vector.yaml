@@ -1,0 +1,190 @@
+# ============================================================================
+# LibreRun — Vector telemetry router (blueprint B4, decision L3)
+#
+# One router for traces and logs, in the box:
+#
+#   backend --OTLP--> vector:4317/4318 --+--> console debug sink (default on)
+#   backend JSON log file --tail--------+--> [your backends — see the gallery]
+#
+# Traces pass through UNMODIFIED (L3: transforms stay on the logs side).
+# The backend already stamps identity (service.name, agent.id, case.id,
+# session.id, user.id) via its OTEL init + AgentSpanEnricher.
+#
+# Operators edit this file in place to add destinations: every sink in the
+# gallery below is a commented block — enabling one is copy-uncomment plus
+# adding its name to nothing else (each block already declares its inputs).
+# Restart Vector afterwards: ./compose.sh restart vector
+# ============================================================================
+
+data_dir: /var/lib/vector
+
+api:
+  # Powers the container healthcheck (GET /health) and `vector top`.
+  # Never published to the host.
+  enabled: true
+  address: 127.0.0.1:8686
+
+sources:
+  # --------------------------------------------------------------------------
+  # OTLP in — both gRPC (:4317) and HTTP (:4318). The backend ships here per
+  # OTEL_EXPORTER_OTLP_ENDPOINT (compose default: http://vector:4317).
+  # Emits two streams: `otlp.traces` and `otlp.logs`.
+  # --------------------------------------------------------------------------
+  otlp:
+    type: opentelemetry
+    grpc:
+      address: 0.0.0.0:4317
+    http:
+      address: 0.0.0.0:4318
+
+  # --------------------------------------------------------------------------
+  # Backend JSON log file — the same ./data/logs/*.jsonl a host-side agent
+  # used to tail. Mounted read-only into this container.
+  # --------------------------------------------------------------------------
+  backend_log_files:
+    type: file
+    include:
+      - /var/log/librerun/*.jsonl
+
+transforms:
+  # Logs side only (traces pass through untouched, per L3). The backend
+  # writes one JSON object per line; lift it into the event so downstream
+  # sinks see structured fields rather than a string blob. Non-JSON lines
+  # (startup noise, partial writes) pass through unparsed.
+  backend_logs:
+    type: remap
+    inputs:
+      - backend_log_files
+    source: |
+      parsed, err = parse_json(.message)
+      if err == null && is_object(parsed) {
+        . = merge!(., object!(parsed))
+        del(.message)
+      }
+
+sinks:
+  # --------------------------------------------------------------------------
+  # Debug sink (ON by default) — every trace span and log event, as JSON, on
+  # Vector's stdout. This is the out-of-box proof that telemetry flows:
+  #   ./compose.sh logs -f vector
+  # Comment it out once a real destination below is enabled if the noise
+  # bothers you; it is the only default destination.
+  # --------------------------------------------------------------------------
+  debug_console:
+    type: console
+    inputs:
+      - otlp.traces
+      - otlp.logs
+      - backend_logs
+    encoding:
+      codec: json
+
+  # ==========================================================================
+  # PLANE ROUTER (optional) — split the two telemetry planes before the
+  # gallery below, per docs/authoring/Agents_Design.md "Observability contract".
+  # Every backend log line carries ``librerun_scope``: "run" = agent work
+  # (may contain LLM prompt/completion content — tighter retention/ACL),
+  # "platform" = chassis serving. Spans carry the same value as the
+  # ``librerun.scope`` attribute (under .attributes on otlp.traces events)
+  # — route sinks by it, but never split one trace across backends: the
+  # joined story is the point.
+  #
+  # THIRD PLANE — ``ux`` (docs/platform/Browser_Observability.md): browser web
+  # vitals / JS errors / page+route views arrive on the SAME otlp source,
+  # but as OTLP log records and spans under their own resource,
+  # ``service.name = "librerun-web"`` (every record also carries the
+  # ``librerun.scope = "ux"`` attribute). Route them at the resource
+  # level, e.g. '.resources."service.name" == "librerun-web"' on
+  # otlp.logs/otlp.traces events. The ux plane carries no free text by
+  # construction (closed schema, server-side translation), so it is safe
+  # to retain longer than the run plane.
+  # ==========================================================================
+  # (transform — uncomment together with sinks that consume its outputs)
+  # plane_router:
+  #   type: route
+  #   inputs:
+  #     - backend_logs
+  #   route:
+  #     run: '.librerun_scope == "run"'
+  #     platform: '.librerun_scope != "run"'
+  # Then feed a gallery sink from one side, e.g.:
+  #   inputs:
+  #     - plane_router.run        # agent work only
+  # or
+  #     - plane_router.platform   # chassis ops only
+
+  # ==========================================================================
+  # SINK GALLERY — commented, copy-uncomment to enable. Set the referenced
+  # environment variables in .env (compose passes them through to this
+  # container). Traces and logs are listed separately where a vendor splits
+  # them; delete the half you don't want.
+  # ==========================================================================
+
+  # --- OTLP anywhere (Jaeger, Tempo, Phoenix, Honeycomb, any collector) ---
+  # Vector's own `opentelemetry` sink (verified through v0.53) serializes
+  # its internal event shape, which OTLP receivers reject with 400 — do
+  # NOT use it for traces. Use the wire-shaping pattern instead: copy the
+  # `viewer_otlp_shape` transform + `viewer_forward` http sink pair from
+  # config/vector-viewer.yaml (that pair is live-verified against Jaeger),
+  # rename them, and point the sink's uri at your receiver's OTLP/HTTP
+  # /v1/traces endpoint via ${VECTOR_OTLP_FORWARD_ENDPOINT:-}.
+
+  # --- Cribl (Cloud or self-hosted Stream) ---
+  # Built in as an OVERLAY — nothing to edit here: set VECTOR_CRIBL=1
+  # plus the CRIBL_* endpoints/tokens in .env, then
+  # `./compose.sh --profile cribl up -d`. Logs ride a Splunk-HEC sink;
+  # traces go through the bundled otel-bridge service, which converts
+  # the wire-shaped OTLP/JSON to the gRPC+protobuf Cribl's OTel source
+  # requires (it 501s JSON). See config/vector-cribl.yaml,
+  # config/otel-bridge.yaml and .env.example.
+
+  # --- Datadog, Elastic, Splunk ---
+  # Also OVERLAYS, not gallery entries any more (blueprint S7a, L26):
+  # each ships BOTH legs — logs through the vendor's own documented
+  # intake, traces as OTLP protobuf through the otel-bridge — with a
+  # CI contract test that decodes what a mock intake received. A
+  # commented three-line sink here was the weaker thing: logs only for
+  # Datadog, nothing at all for the other two, and no test.
+  #   LIBRERUN_OBS_VENDOR=datadog   (or elastic, or splunk) in .env
+  #   the vendor's values in observability.env
+  #   ./compose.sh --profile obs up -d
+  # See config/vector-datadog.yaml, config/vector-elastic.yaml,
+  # config/vector-splunk.yaml and docs/platform/Observability.md.
+
+  # --- ClickHouse (logs warehouse) ---
+  # clickhouse_logs:
+  #   type: clickhouse
+  #   inputs:
+  #     - otlp.logs
+  #     - backend_logs
+  #   endpoint: "${CLICKHOUSE_ENDPOINT:-}"              # e.g. http://clickhouse:8123
+  #   database: librerun
+  #   table: logs
+  #   skip_unknown_fields: true
+
+  # --- S3 (cold archive of everything) ---
+  # s3_archive:
+  #   type: aws_s3
+  #   inputs:
+  #     - otlp.logs
+  #     - backend_logs
+  #   bucket: "${VECTOR_S3_BUCKET:-}"
+  #   key_prefix: "librerun/%Y/%m/%d/"
+  #   region: "${AWS_REGION:-}"
+  #   compression: gzip
+  #   encoding:
+  #     codec: json
+  #   framing:
+  #     method: newline_delimited
+
+  # --- Loki (Grafana logs) ---
+  # loki_logs:
+  #   type: loki
+  #   inputs:
+  #     - otlp.logs
+  #     - backend_logs
+  #   endpoint: "${LOKI_ENDPOINT:-}"                    # e.g. http://loki:3100
+  #   encoding:
+  #     codec: json
+  #   labels:
+  #     service: librerun

@@ -1,0 +1,86 @@
+name: Bug report
+description: Something in LibreRun does not do what it says it does.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. **Not for vulnerabilities** — those go
+        through the private route in
+        [SECURITY.md](https://github.com/JeremiahJRRoss/librerun/blob/main/SECURITY.md), never a public issue.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what happened, and what you expected instead.
+      placeholder: |
+        I ran `./scripts/demo.sh`, logged in, submitted the VITA sample, and
+        the run stayed at "queued" forever. I expected progress rows.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: >
+        The shortest path from a clean checkout. A command that fails beats a
+        paragraph that describes one.
+      placeholder: |
+        1. git clone … && cd librerun
+        2. ./scripts/demo.sh
+        3. Log in, New run, VITA, "Try a sample", submit
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: >
+        The `VERSION` file, the tag, or the commit.
+      placeholder: "1.0.0-rc1 (or: commit 1a2b3c4)"
+    validations:
+      required: true
+  - type: dropdown
+    id: how-started
+    attributes:
+      label: How the stack was started
+      options:
+        - ./scripts/demo.sh (built from source)
+        - librerun demo / librerun up
+        - ./compose.sh with my own .env
+        - Local uvicorn + npm run dev
+        - Other (say so above)
+    validations:
+      required: true
+  - type: input
+    id: engine
+    attributes:
+      label: Container engine and OS
+      placeholder: "Docker 27.3 on Ubuntu 26.04 / Podman 5.2 on CentOS Stream 10"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs, and the trace if you have one
+      description: >
+        `librerun logs backend` (or `./compose.sh logs backend`), the browser
+        console if it is a UI bug, and the trace id from "View trace".
+        **Redact anything real** — this is a public issue.
+      render: text
+  - type: textarea
+    id: agent
+    attributes:
+      label: Which agent
+      description: >
+        The bundled demo agent, one of the examples, a scaffolded agent of your
+        own, or none (a chassis bug). If it is your own, what framework?
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you file
+      options:
+        - label: I searched the open issues for this.
+          required: true
+        - label: This is not a vulnerability report (those are private — SECURITY.md).
+          required: true

@@ -1,0 +1,46 @@
+# ============================================================================
+# LibreRun — OTLP protobuf bridge, Datadog leg (blueprint S7a)
+#
+# Selected by LIBRERUN_OBS_VENDOR=datadog: compose points the bridge at
+# this file instead of config/otel-bridge.yaml (the Cribl leg). One
+# stock OpenTelemetry Collector doing exactly one spec-defined job:
+#
+#   vector (datadog_traces sink, OTLP/JSON over HTTP, in-network)
+#     --> this bridge :4318 /v1/traces
+#     --> OTLP HTTP + protobuf --> a Datadog Agent's OTLP receiver
+#
+# Why the Agent and not Datadog directly: Datadog's trace intake is not
+# an OTLP endpoint. The documented OTLP path is the Agent's own OTLP
+# receiver (otlp_config.receiver.protocols.http), and the Agent holds
+# DD_API_KEY and DD_SITE itself — so no credential is configured here,
+# and none needs to be.
+#
+# DD_AGENT_OTLP_URL is the Agent's OTLP/HTTP traces URL with its path,
+# e.g. http://datadog-agent:4318/v1/traces. `traces_endpoint` rather
+# than `endpoint` because the URL is given whole: `endpoint` would
+# append /v1/traces a second time.
+#
+# Runs only with the `obs` compose profile; never publishes a port —
+# the only listener is on the compose network. An empty
+# DD_AGENT_OTLP_URL stops the bridge at start-up with a named error
+# rather than starting something that drops every span.
+# ============================================================================
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+exporters:
+  otlphttp:
+    traces_endpoint: ${env:DD_AGENT_OTLP_URL}
+
+service:
+  telemetry:
+    logs:
+      level: warn
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [otlphttp]

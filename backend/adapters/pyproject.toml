@@ -1,0 +1,35 @@
+# The LangGraph adapter as an installable distribution (blueprint B16),
+# so the import path the quickstart documents is the one that actually
+# works:
+#
+#     pip install ./backend/adapters
+#     from librerun_langgraph import LangGraphAgent
+#
+# Same tier-1 packaging shape as the VITA agent at B12: the chassis
+# (``app.*``) is a documented host requirement rather than a dependency
+# — an adapter runs inside a LibreRun process, so declaring the chassis
+# here would invert the relationship.
+[project]
+name = "librerun-langgraph"
+version = "1.1.0b1"
+description = "Run a compiled LangGraph graph as a LibreRun agent"
+# No `readme` pointing at docs/authoring/LangGraph.md: setuptools
+# refuses any path outside the project directory, and the build fails
+# outright rather than degrading. The quickstart is linked instead.
+urls.Documentation = "https://github.com/JeremiahJRRoss/librerun/blob/main/docs/authoring/LangGraph.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+authors = [{ name = "The LibreRun contributors" }]
+dependencies = [
+  "langgraph",
+  # opentelemetry-api only: the adapter opens spans, it never configures
+  # export — that is the chassis' job.
+  "opentelemetry-api",
+]
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["librerun_langgraph"]

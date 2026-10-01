@@ -1,0 +1,173 @@
+# ============================================================================
+# LibreRun — the HTTPS edge (K blueprint T1 and T2; decisions L35, L42, L43,
+# D37, D44)
+#
+# HTTPS between the browser and LibreRun, and nothing more: the `edge`
+# service in compose.yaml runs this file under the opt-in `tls` profile,
+#
+#   ./compose.sh --profile app --profile tls up -d --build
+#
+# through config/edge-start.sh, and `edge-control` posts it back to the
+# edge's admin socket to apply a change made in the admin UI. Behind it the
+# services still speak plain HTTP to each other on the compose network
+# (TLS between them is on the roadmap, v1.2 and later).
+#
+# One site on one port. The site is LIBRERUN_TLS_DOMAIN (default
+# `localhost`; a LAN names the host the browsers use). The certificate
+# comes from whatever LIBRERUN_TLS names, unless LIBRERUN_TLS_CA names a CA
+# of your own or a platform admin chose otherwise on Application Settings
+# (T2). Both variables are substituted BEFORE this file is parsed, so
+# LIBRERUN_TLS may expand to more than one token, and it takes the `tls`
+# directive's three documented forms:
+#
+#   internal                        Caddy's own local CA (the default). The
+#                                   root to trust sits in the edge's data
+#                                   volume: /data/caddy/pki/authorities/local/root.crt
+#   you@example.com                 ACME with that account e-mail (Let's
+#                                   Encrypt, then ZeroSSL). Needs the domain's
+#                                   public DNS and port 443 reaching this
+#                                   container from outside.
+#   /certs/cert.pem /certs/key.pem  the operator's own files, mounted
+#                                   read-only from LIBRERUN_TLS_CERT_DIR
+#                                   (default ./tls)
+#
+# /api/v1/* goes straight to the backend, everything else to the web UI,
+# and no route names an agent (L13). docs/platform/Install.md, "HTTPS at
+# the edge", is the operator's page; docs/platform/Security.md,
+# "Transport", says what this protects and what it does not.
+# ============================================================================
+{
+	# The one port the edge publishes, as ${LIBRERUN_HTTPS_PORT:-8443}.
+	# Not 443 inside the container, so rootless Podman needs no sysctl to
+	# start it; 443 on the host is a publish (Install.md, per engine).
+	https_port 8443
+	# http_port stays at its default inside the container and is never
+	# published: nothing outside reaches it, so ACME validates by
+	# TLS-ALPN-01 on 443, which Caddy answers on https_port above.
+	#
+	# The admin API, on a Unix socket in the control volume and never on
+	# TCP (T2; L42, D44 refined). Only the edge and `edge-control` mount
+	# that volume — never the backend, the web UI or an agent — and
+	# `edge-control` alone posts this file back to /load after a change.
+	# 0666 because `edge-control` runs as `librerun` and the edge as root:
+	# 0660 would refuse it, and the volume is the boundary.
+	admin unix//control/admin.sock|0666
+	# Caddy never tries to install its own root into the container's trust
+	# store; the operator trusts it on the machines that browse.
+	skip_install_trust
+	# HTTP/1.1 and HTTP/2 only. The publish is TCP, so HTTP/3 (QUIC, over
+	# UDP) could never arrive, and advertising it (Alt-Svc) would only send
+	# browsers after a port that is not there.
+	servers {
+		protocols h1 h2
+	}
+	# Every CA the edge may name, in one `pki` block in one file,
+	# /control/pki.global.caddy: the environment's (LIBRERUN_TLS_CA, which
+	# config/edge-start.sh writes at every start) and one loaded on
+	# Application Settings (which `edge-control` writes). Caddy keeps the
+	# last `pki` option it parses and drops the rest, so there is never a
+	# second file; with no CA to name, the glob matches nothing.
+	import /control/*.global.caddy
+}
+
+# What the environment says: LIBRERUN_TLS, or `internal` when it is unset.
+# /control/env.caddy imports it, or names LIBRERUN_TLS_CA's CA instead.
+(tls_environment) {
+	tls {$LIBRERUN_TLS:internal}
+}
+
+{$LIBRERUN_TLS_DOMAIN:localhost} {
+	# The certificate in effect: `import /control/env.caddy` (the
+	# environment's, above) until a platform admin chooses otherwise on
+	# Application Settings, and again after "Use the environment's
+	# setting". config/edge-start.sh writes it at every start with no
+	# choice recorded; `edge-control` writes the admin's choice.
+	import /control/tls.caddy
+
+	# Deferred, so these replace whatever an upstream says rather than
+	# being sent beside it.
+	header {
+		defer
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		# Every load and every send from this origin alone (K7): scripts,
+		# styles, images, fonts, fetches and form posts, and no framing,
+		# <base> or plugin. 'unsafe-inline' for scripts is Next 14.2.5's
+		# inline bootstrap and for styles the report's own <style>; a
+		# nonce-based script-src is a v1.2 issue, and would need this line
+		# removed, since a deferred header replaces whatever policy an
+		# upstream sends. connect-src 'self' holds because the web UI calls
+		# /api/v1 on this origin, which the route below sends to the backend.
+		# data: and blob: are the images and fonts the pages inline, and the
+		# PDF export's blob: tab. A plain-HTTP start without the edge sends
+		# no policy at all; next.config.js sets none.
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'self'; object-src 'none'"
+	}
+
+	# HSTS binds a host on EVERY port: a browser that kept it for
+	# `localhost` would upgrade the plain http://localhost:3000 the demo and
+	# a start without this profile serve. Chromium does not keep it for
+	# localhost and Firefox was not measured (K blueprint §11, T1), and on a
+	# loopback name the header protects nothing, so a site named localhost
+	# does not send it. Any other name does: no includeSubDomains, no
+	# preload.
+	@hsts not host localhost
+	header @hsts {
+		defer
+		Strict-Transport-Security "max-age=31536000"
+	}
+
+	# Caddy sets X-Forwarded-For and X-Forwarded-Proto itself and replaces
+	# any a client sent, since no upstream of this edge is trusted. The
+	# backend trusts them from the edge's address alone
+	# (FORWARDED_ALLOW_IPS in compose.yaml). No response timeout, and a
+	# text/event-stream is flushed as it arrives, so run progress streams.
+	#
+	# The certificate changes (T2) — a CA, a certificate and key, ACME, back
+	# to the environment — go to `edge-control`, which alone holds the
+	# admin socket, and never to the backend: a key arrives in their body,
+	# and nothing in the backend's process, where an in-process agent runs,
+	# may receive it (L42, D44 refined). forward_auth first asks the backend
+	# whether the caller is a platform admin, sending the request's headers
+	# and never its body; the backend audits the change it lets through and
+	# names the admin in X-Librerun-Chosen-By, which replaces any a client
+	# sent. Of the rest of /api/v1/admin/tls the backend gets its own three
+	# routes, each by method and path, and nothing else: a body sent any
+	# other way — a key to a mistyped path, or with the wrong method — never
+	# reaches the backend, and /authorize is forward_auth's alone. A change
+	# sent with the wrong method reaches no one either: forward_auth passes
+	# it no body, and the backend's answer refuses it.
+	handle /api/v1/admin/tls* {
+		@tls_change path /api/v1/admin/tls/ca /api/v1/admin/tls/files /api/v1/admin/tls/acme /api/v1/admin/tls/choice
+		@tls_read {
+			method GET
+			path /api/v1/admin/tls /api/v1/admin/tls/root.pem
+		}
+		@tls_acknowledge {
+			method POST
+			path /api/v1/admin/tls/acknowledge
+		}
+		route @tls_change {
+			request_header -X-Librerun-Chosen-By
+			forward_auth backend:8000 {
+				uri /api/v1/admin/tls/authorize
+				copy_headers X-Librerun-Chosen-By
+			}
+			reverse_proxy edge-control:8081
+		}
+		route @tls_read {
+			reverse_proxy backend:8000
+		}
+		route @tls_acknowledge {
+			reverse_proxy backend:8000
+		}
+		respond 404
+	}
+	handle /api/v1/* {
+		reverse_proxy backend:8000
+	}
+	handle {
+		reverse_proxy frontend:3000
+	}
+}

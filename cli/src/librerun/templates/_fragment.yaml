@@ -1,0 +1,40 @@
+
+  # __AGENT_NAME__ — appended by `librerun init __AGENT_ID__ --template __TEMPLATE__`
+  # in the example services' exact shape (blueprint S6): the gateway
+  # environment, this agent's own key, the internal `agents` network, the
+  # label the CLI maps the agent to, and no persisted logs.
+  __SERVICE__:
+    build:
+      # The repository root, like the examples: the Python SDK installs
+      # from sdk/python/librerun-agent (it is not published yet).
+      context: .
+      dockerfile: backend/agents/__PACKAGE__/Dockerfile
+    # Built from this checkout on every `up` (from cache when nothing
+    # changed) and never pulled, like every service that builds (#133).
+    pull_policy: build
+    container_name: librerun-__AGENT_ID__
+    # Started by `librerun up` (which passes --profile agents); the
+    # bundled examples live under `demo`. By hand:
+    #   ./compose.sh --profile agents up -d __SERVICE__
+    profiles: ["agents"]
+    labels:
+      librerun.agent_id: __AGENT_ID__
+    environment:
+__OTEL_LINE__
+      OTEL_SERVICE_NAME: __AGENT_ID__
+      # The LLM gateway (blueprint S4a). Both spellings: the SDK reads
+      # LIBRERUN_GATEWAY_URL, a framework that only speaks OpenAI reads
+      # OPENAI_BASE_URL — pointing it at the gateway is its whole
+      # integration.
+      LIBRERUN_GATEWAY_URL: http://gateway:8090
+      OPENAI_BASE_URL: http://gateway:8090/v1
+      # This agent's LibreRun gateway key, NOT a provider key (D10). `:?`
+      # so an unprovisioned agent stops `up` with a named error instead
+      # of starting a container whose every model call is refused.
+      OPENAI_API_KEY: ${__KEY_VARIABLE__:?agent key not provisioned — run librerun up, or add __KEY_VARIABLE__ to .env}
+    networks:
+      - agents
+      # - egress   # only with ``network.egress: true`` in agent.yaml
+    logging:
+      driver: none
+    restart: unless-stopped

@@ -1,0 +1,102 @@
+# Locked decision L12, enforced forever (blueprint B15a): the working
+# tree speaks only LibreRun. The retired names are not censored history —
+# git history keeps every one of them. Read the retired documents at
+# commit 3a1b0b4, which is ALREADY ON MAIN and so reachable from any
+# clone independent of how this branch is merged:
+#     git show 3a1b0b4:docs/LibreRun_Blueprint.md    # 476 lines
+#     git show 3a1b0b4:docs/LibreRun_Prompts.md      #  94 lines
+# 7787bba carries one line more — the B17 deviations entry — and is an
+# ancestor of main only if this branch lands as a merge commit, which is
+# why the guaranteed reference is the one quoted above.
+# What this job prevents is a name coming BACK into a checked-out file,
+# where a reader would take it for something that still exists.
+name: name-purity
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  name-purity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: No retired names in the working tree
+        run: |
+          set -euo pipefail
+
+          # The pattern is assembled from fragments rather than spelled
+          # out, so this file is not its own exception. Written
+          # literally, the checker would match itself, and the only fix
+          # would be to exclude the checker — which is precisely the one
+          # file where a violation could then hide unnoticed.
+          RETIRED_A='guide'
+          RETIRED_B='flow'
+          PATTERN="${RETIRED_A}run|${RETIRED_B}run"
+
+          # ZERO EXCLUSIONS. The blueprint was the single temporary one
+          # — it had to name what it was retiring in order to describe
+          # the work — and it was deleted at B17 along with this
+          # exclusion, per L12. The document is preserved forever at the
+          # commit 3a1b0b4, which is already on main — see the header —
+          # so nothing is lost by the rule being absolute from here on.
+          # (A `blueprint/librerun-v1` tag was intended and could not be
+          # pushed from the automation session; commit references are used
+          # because they exist and the tag did not.)
+          # Do not add another exclusion:
+          # the one file a name is allowed to hide in is the one file
+          # nobody will think to check.
+          # -i is load-bearing, not decoration: the names are normally
+          # written capitalised, so a case-SENSITIVE search for the
+          # lowercase spelling would pass a tree full of them.
+          #
+          # There is deliberately no -I. It reads like harmless hygiene
+          # ("skip binary files"), but it exempts every tracked binary
+          # from the rule — a retired name embedded in an asset's
+          # metadata would pass. L12 specifies this search without it,
+          # and a false positive here (a binary that happens to contain
+          # the byte sequence) is a five-second look, whereas a silent
+          # exemption is permanent.
+          if git grep -rinE "$PATTERN" -- ':!.git'; then
+            echo "::error::A retired platform name is back in the CONTENTS of a tracked file (see the matches above). L12 is a zero-reference rule: the tree speaks only LibreRun. If the occurrence is load-bearing — an env var, an import path, a stored value — L12's alias rule applies: keep a deprecation alias for one release rather than a hard rename, and say so in the pull request description AND the commit message — the blueprint's deviations log was where this used to point, and it was retired at B17, so a tagged copy cannot record anything new. Otherwise rewrite or delete it; the history stays in git — both retired documents are readable at commit 3a1b0b4, which is already on main: 'git show 3a1b0b4:docs/LibreRun_Blueprint.md'."
+            exit 1
+          fi
+
+          # Contents are only half of it. `git grep` searches inside
+          # files and has no pathname-matching mode, so a file *named*
+          # docs/OldName-notes.md with neutral contents would sail
+          # through — and the purge this enforces is explicitly a
+          # comment/doc/FILENAME purge (B2 renamed a user manual for
+          # exactly this reason). Check the tracked paths too.
+          if git ls-files | grep -iE "$PATTERN"; then
+            echo "::error::A retired platform name is in a tracked PATH (see the matches above). Rename the file or directory; the same L12 rules apply as for file contents."
+            exit 1
+          fi
+
+          # Symlinks slip past BOTH checks above: git grep skips symlink
+          # blobs, and git ls-files prints the link's own path, not what
+          # it points at — so `current-docs -> OldName-docs` reads clean
+          # twice over. A symlink's target IS its blob content, so read
+          # it from the index rather than with readlink; that way the
+          # check holds even where symlinks are materialised as plain
+          # files (Windows checkouts, some archive extractions).
+          SYMLINK_HIT=0
+          while read -r mode sha _stage path; do
+            [ "$mode" = "120000" ] || continue
+            target="$(git cat-file blob "$sha")"
+            if grep -qiE "$PATTERN" <<< "$target"; then
+              echo "$path -> $target"
+              SYMLINK_HIT=1
+            fi
+          done < <(git ls-files -s)
+          if [ "$SYMLINK_HIT" = 1 ]; then
+            echo "::error::A retired platform name is in a tracked SYMLINK TARGET (see the matches above). The link's own path is clean, which is why the earlier checks passed; repoint or remove the link."
+            exit 1
+          fi
+
+          echo "clean: no retired names in contents, paths, or symlink targets — no exclusions"

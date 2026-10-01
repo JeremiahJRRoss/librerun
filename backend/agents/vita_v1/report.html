@@ -1,0 +1,161 @@
+{% macro ext(url, text) -%}
+<a href="{{ url }}" target="_blank" rel="noopener noreferrer">{{ text }}</a>
+{%- endmacro %}
+{% set vita_styles -%}
+.vita-report { font-family: -apple-system, "Segoe UI", sans-serif; color: #111; max-width: 800px; margin: 2rem auto; line-height: 1.5; }
+.vita-report h1, .vita-report h2, .vita-report h3 { color: #1e3a8a; }
+.vita-report .vita-meta { color: #555; font-size: 0.9rem; }
+.vita-report .vita-section { border: 1px solid #ddd; border-radius: 8px; padding: 1rem; margin-top: 1rem; background: #fff; }
+.vita-report .vita-citation-ref { vertical-align: super; font-size: 0.7em; color: #2563eb; text-decoration: none; }
+.vita-report .vita-citation-ref:hover { text-decoration: underline; }
+.vita-report table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; }
+.vita-report th, .vita-report td { border-bottom: 1px solid #eee; padding: 4px 8px; text-align: left; font-size: 0.85rem; }
+.vita-report th { background: #f5f5f5; }
+.vita-report .vita-pill { display: inline-block; background: #e0e7ff; color: #1e3a8a; padding: 1px 6px; border-radius: 4px; font-size: 0.75rem; margin-right: 4px; }
+.vita-report .vita-kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; font-size: 0.9rem; }
+.vita-report .vita-kv dt { font-weight: 600; color: #475569; }
+.vita-report .vita-kv dd { margin: 0; }
+.vita-report pre { background: #0f172a; color: #e2e8f0; padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 0.8rem; white-space: pre-wrap; word-break: break-word; }
+.vita-report details summary { cursor: pointer; font-weight: 600; }
+.vita-report .vita-followup { border-left: 3px solid #1e3a8a; padding: 0 8px; margin: 8px 0; }
+{%- endset %}
+{% if not embedded %}<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>VITA Report — {{ case.run_number }}</title>
+<style>
+{{ vita_styles }}
+body { background: #f8fafc; }
+</style>
+</head>
+<body>
+{% else %}<style>{{ vita_styles }}</style>{% endif %}
+<div class="vita-report">
+  <h1>VITA Investigation Report — {{ case.run_number }}</h1>
+  <p class="vita-meta">Generated {{ generated_at }} · {{ case.vendor_a_name }} ↔ {{ case.vendor_b_name }} · severity: {{ case.severity or "—" }}</p>
+
+  <section class="vita-section">
+    <h2>Run</h2>
+    <dl class="vita-kv">
+      <dt>Run number</dt><dd>{{ case.run_number }}</dd>
+      <dt>Status</dt><dd>{{ case.status }}</dd>
+      <dt>Severity</dt><dd>{{ case.severity or "—" }}</dd>
+      <dt>Created</dt><dd>{{ case.created_at.isoformat() if case.created_at else "—" }}</dd>
+      <dt>Updated</dt><dd>{{ case.updated_at.isoformat() if case.updated_at else "—" }}</dd>
+      <dt>Vendor A</dt><dd>{{ case.vendor_a_name }}{% if case.vendor_a_product %} · {{ case.vendor_a_product }}{% endif %}{% if case.vendor_a_feature %} / {{ case.vendor_a_feature }}{% endif %}</dd>
+      <dt>Vendor B</dt><dd>{{ case.vendor_b_name }}{% if case.vendor_b_product %} · {{ case.vendor_b_product }}{% endif %}{% if case.vendor_b_feature %} / {{ case.vendor_b_feature }}{% endif %}</dd>
+      {% if case.trace_id %}<dt>Trace ID</dt><dd><code>{{ case.trace_id }}</code></dd>{% endif %}
+    </dl>
+  </section>
+
+  <section class="vita-section">
+    <h2>Original inputs</h2>
+    <h3>Use case</h3>
+    <p>{{ case.use_case }}</p>
+    <h3>Problem statement</h3>
+    <p style="white-space: pre-wrap;">{{ case.problem_statement }}</p>
+    {% if case.impact_statement %}
+    <h3>Impact statement</h3>
+    <p style="white-space: pre-wrap;">{{ case.impact_statement }}</p>
+    {% endif %}
+    <h3>{{ case.vendor_a_name }} observation</h3>
+    <p style="white-space: pre-wrap;">{{ case.vendor_a_observation or "—" }}</p>
+    <h3>{{ case.vendor_b_name }} observation</h3>
+    <p style="white-space: pre-wrap;">{{ case.vendor_b_observation or "—" }}</p>
+  </section>
+
+  {% if refined %}
+  <section class="vita-section">
+    <h2>Refined problem statement</h2>
+    <p style="white-space: pre-wrap;">{{ refined.refined_problem_statement }}</p>
+    {% if refined.key_signals %}
+    <h3>Key signals</h3>
+    <p>{% for s in refined.key_signals %}<span class="vita-pill">{{ s }}</span>{% endfor %}</p>
+    {% endif %}
+    {% if refined.suspected_root_causes %}
+    <h3>Suspected root causes</h3>
+    <ol>{% for c in refined.suspected_root_causes %}<li>{{ c }}</li>{% endfor %}</ol>
+    {% endif %}
+    {% if refined.research_focus_areas %}
+    <h3>Research focus areas</h3>
+    <ul>{% for f in refined.research_focus_areas %}<li>{{ f }}</li>{% endfor %}</ul>
+    {% endif %}
+  </section>
+  {% endif %}
+
+  {% if works_cited_a %}
+  <section class="vita-section">
+    <h2>Works cited — {{ case.vendor_a_name }}</h2>
+    <table>
+      <tr><th>#</th><th>Title</th><th>Type</th><th>Summary</th></tr>
+      {% for c in works_cited_a %}
+      <tr id="cite-{{ c.id }}"><td>{{ c.id }}</td><td>{{ ext(c.url, c.title) }}</td><td>{{ c.doc_type }}</td><td>{{ c.summary }}</td></tr>
+      {% endfor %}
+    </table>
+  </section>
+  {% endif %}
+
+  {% if works_cited_b %}
+  <section class="vita-section">
+    <h2>Works cited — {{ case.vendor_b_name }}</h2>
+    <table>
+      <tr><th>#</th><th>Title</th><th>Type</th><th>Summary</th></tr>
+      {% for c in works_cited_b %}
+      <tr id="cite-{{ c.id }}"><td>{{ c.id }}</td><td>{{ ext(c.url, c.title) }}</td><td>{{ c.doc_type }}</td><td>{{ c.summary }}</td></tr>
+      {% endfor %}
+    </table>
+  </section>
+  {% endif %}
+
+  {% if skills %}
+  <section class="vita-section">
+    <h2>Skills cited</h2>
+    <ul>{% for s in skills %}<li><b>{{ s.name }}</b> ({{ s.source }}, weight {{ "%.2f"|format(s.relevance_weight) }}) — {{ s.description }}</li>{% endfor %}</ul>
+  </section>
+  {% endif %}
+
+  {% for key, label in [("mitigation", "Immediate mitigation"), ("resolution", "Root cause resolution"), ("avoidance", "Future avoidance")] %}
+    {% if plan and plan[key] %}
+    <section class="vita-section" data-section="{{ key }}">
+      <h2>{{ label }}</h2>
+      <p style="white-space: pre-wrap;">{{ plan[key].text|safe }}</p>
+    </section>
+    {% endif %}
+  {% endfor %}
+
+  {% if followups %}
+  <section class="vita-section">
+    <h2>Follow-up questions</h2>
+    {% for q in followups %}
+    <div class="vita-followup">
+      <b>{{ q.question }}</b><br/>
+      <em>{{ q.rationale }}</em><br/>
+      <small>Expected impact: {{ q.expected_impact }}</small>
+    </div>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  {% if logs_a or logs_b %}
+  <section class="vita-section">
+    <h2>Redacted logs</h2>
+    {% if logs_a %}
+    <details{% if not embedded %} open{% endif %}>
+      <summary>{{ case.vendor_a_name }} logs ({{ "%.1f"|format(logs_a|length / 1024) }} KB)</summary>
+      <pre>{{ logs_a }}</pre>
+    </details>
+    {% endif %}
+    {% if logs_b %}
+    <details{% if not embedded %} open{% endif %}>
+      <summary>{{ case.vendor_b_name }} logs ({{ "%.1f"|format(logs_b|length / 1024) }} KB)</summary>
+      <pre>{{ logs_b }}</pre>
+    </details>
+    {% endif %}
+  </section>
+  {% endif %}
+</div>
+{% if not embedded %}
+</body>
+</html>
+{% endif %}

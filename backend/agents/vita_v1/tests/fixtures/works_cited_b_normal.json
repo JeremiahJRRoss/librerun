@@ -1,0 +1,26 @@
+[
+  {
+    "id": 24,
+    "url": "https://dev.to/lisahjung/part-6-set-up-elasticsearch-for-data-transformation-and-data-ingestion-4m2c",
+    "title": "Part 6: Set up Elasticsearch for data transformation and data ingestion - DEV Community",
+    "summary": "This article discusses setting up Elasticsearch to handle data transformation and ingestion, including converting timestamps to UNIX_MS format.",
+    "doc_type": "kb_article",
+    "relevance_score": 0.7634314
+  },
+  {
+    "id": 39,
+    "url": "https://discuss.elastic.co/t/dateformat-in-ingest-pipeline/295567",
+    "title": "DateFormat in ingest pipeline - Kibana - Discuss the Elastic Stack",
+    "summary": "This discussion addresses common date parsing errors in Elasticsearch ingest pipelines and provides solutions for correcting date formats.",
+    "doc_type": "kb_article",
+    "relevance_score": 0.998884
+  },
+  {
+    "id": 31,
+    "url": "https://www.elastic.co/docs/manage-data/ingest/transform-enrich/error-handling",
+    "title": "Error handling | Elastic Docs",
+    "summary": "This guide outlines strategies for handling errors in Elasticsearch ingest pipelines, focusing on data transformation and enrichment errors.",
+    "doc_type": "kb_article",
+    "relevance_score": 0.99580115
+  }
+]

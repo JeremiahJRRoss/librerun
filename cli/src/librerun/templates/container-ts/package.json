@@ -1,0 +1,22 @@
+{
+  "name": "__PACKAGE__",
+  "version": "0.1.0",
+  "private": true,
+  "description": "__AGENT_NAME__: Run Contract v1 in TypeScript on the LibreRun gateway",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "start": "tsx server.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "comment": "Exact pins, not ranges, so the image builds the same way twice; bump them deliberately with the battery green. No zod: a tool's schema is declared as plain JSON Schema, because a zod conversion emits a `$schema` URL the gateway's outbound walk refuses (see the reference server, backend/agents/_examples/vercel_ai_answer_ts/server.ts). The devDependencies are the type checker only — the image installs with --omit=dev and tsx strips types without checking them, so `npm run typecheck` is what reads them.",
+  "dependencies": {
+    "@ai-sdk/openai": "4.0.71",
+    "ai": "7.0.107",
+    "tsx": "4.23.15"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.0",
+    "typescript": "5.9.3"
+  }
+}
