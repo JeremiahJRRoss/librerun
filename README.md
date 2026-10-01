@@ -336,15 +336,3 @@ over a network, the AGPL asks you to offer them your version's source.
 LibreRun comes **with no warranty**: it is provided as is, without
 warranty of any kind, express or implied, as sections 15 and 16 of the
 licence state, and nothing in this repository adds one.
-
-The licence covers the software, not the name:
-[`TRADEMARKS.md`](TRADEMARKS.md) says what a fork may call itself.
-
-Contributions come in under a [Developer Certificate of
-Origin](https://developercertificate.org/) sign-off — `git commit -s` —
-which is an attestation, not a copyright assignment, and no CLA. [`CONTRIBUTING.md`](CONTRIBUTING.md) has the development
-loop and the house rules, including the one this project will not bend:
-never weaken a check to make it pass.
-[`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) applies everywhere the
-project happens, and vulnerabilities go through
-[`SECURITY.md`](SECURITY.md) — privately, never a public issue.
