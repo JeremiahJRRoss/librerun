@@ -74,7 +74,7 @@ never holds a provider key. `librerun init` scaffolds either path;
 Jaeger in the box: one tree from intake through your agent's own spans,
 with the model, tokens and cost of every LLM call on it. An audit log
 per run. PII redacted before anything is stored — and tested overlays
-that ship the same traces and logs to **Datadog**, **Elastic** or
+that ship the same traces and logs to  **Cribl,** **Datadog**, **Elastic** or
 **Splunk**.
 
 ---
@@ -93,7 +93,7 @@ page here says what the code does, not what it promises.
 | **Framework selection** | What a framework gives an agent and what the chassis gives instead: one small agent as three templates — in-process on LangGraph, a Python container on the SDK, a TypeScript container on the Run Contract — and four examples, on LangGraph, LlamaIndex, the Vercel AI SDK and the echo agent on the Python SDK; PII redaction, the model chosen per step, the gate and the trace come from the chassis whichever you pick. The rules the tree states for the choice: an agent you do not trust runs in a container, an existing graph runs in-process, any other language serves the Run Contract. A page that compares the frameworks is not written yet | the three templates in [`docs/authoring/Quickstart.md`](docs/authoring/Quickstart.md), the four examples under `backend/agents/_examples/`, [`docs/authoring/LangGraph.md`](docs/authoring/LangGraph.md), [the trust model](docs/platform/Security.md#the-runtime-trust-model-in-three-lines), [`docs/authoring/Run_Contract_v1.md`](docs/authoring/Run_Contract_v1.md), and the conformance battery that says when an agent is done |
 | **Security** | Where the boundaries lie — the trust model in three lines, tenancy on every query, PII redaction that fails closed, the gateway as the only process that holds a provider key, and what is *not* protected | [`docs/platform/Security.md`](docs/platform/Security.md#the-runtime-trust-model-in-three-lines), [`docs/authoring/LLM_Gateway.md`](docs/authoring/LLM_Gateway.md), [`SECURITY.md`](SECURITY.md) |
 | **Operating environments** | What an agent needs from the environment it runs in — Linux only; Docker Compose or Podman Compose orchestrating the containers, typically inside a Linux virtual machine; the run modes, the ports, what a container agent can reach and the egress its manifest declares, which secret lives in which process, the per-OS install layer, and `librerun doctor` | [`docs/platform/Install.md`](docs/platform/Install.md), [`docs/platform/Install_CentOS_Ubuntu.md`](docs/platform/Install_CentOS_Ubuntu.md), [`docs/authoring/Container_Agents.md`](docs/authoring/Container_Agents.md), [what a container agent can reach](docs/platform/Security.md#what-a-container-agent-can-reach) |
-| **Observability** | How a run is observed — one trace per run across the gate, the model, tokens and cost of every LLM call, three stamped telemetry planes, and the same telemetry into Jaeger, Datadog, Elastic or Splunk. The tracing and observability tools are designed to teach evaluation as well | [`docs/platform/Observability.md`](docs/platform/Observability.md), [`docs/platform/Browser_Observability.md`](docs/platform/Browser_Observability.md) |
+| **Observability** | How a run is observed — one trace per run across the gate, the model, tokens and cost of every LLM call, three stamped telemetry planes, and the same telemetry into Jaeger, Cribl,  Datadog, Elastic or Splunk. The tracing and observability tools are designed to teach evaluation as well | [`docs/platform/Observability.md`](docs/platform/Observability.md), [`docs/platform/Browser_Observability.md`](docs/platform/Browser_Observability.md) |
 | **Evaluation** | Taught with the core code's instruments, which are designed for it: the gateway — the LLM router, one span per call with model, tokens and cost — the edge proxy, the cache, the trace, the scenarios, the feedback thumbs and the conformance battery. The pages that teach evaluation with them are not written yet, and 1.0 has no scored runs | [`docs/authoring/LLM_Gateway.md`](docs/authoring/LLM_Gateway.md), [`docs/platform/Observability.md`](docs/platform/Observability.md), [HTTPS at the edge](docs/platform/Install.md#https-at-the-edge), [what 1.0 does not do yet](#what-10-does-not-do-yet) |
 | **Optimization** | Taught with the same instruments: the model, temperature, token limit and timeout chosen per step in the admin UI with nothing restarted, and the cost on every LLM span. The pages are not written yet; a cost panel, smart routing and budgets are v1.2 | [`docs/authoring/Quickstart.md` §6](docs/authoring/Quickstart.md#6-change-the-model-without-touching-code), [`docs/authoring/LLM_Gateway.md`](docs/authoring/LLM_Gateway.md), [the roadmap](docs/release/v1.0.0.md#roadmap) |
 
@@ -193,7 +193,7 @@ is the hour path end to end.
 | **The gateway** | One door to every model. Agents never hold a provider key; keyless stub mode runs the whole pipeline with none configured |
 | **Reports** | HTML in the page and PDF export from the same Jinja template, so what you read is what you download |
 | **Feedback** | Per-section thumbs, persisted, with an admin dashboard |
-| **Observability** | OpenTelemetry through a bundled Vector router; Jaeger in the box; tested Datadog, Elastic and Splunk overlays; three stamped telemetry planes |
+| **Observability** | OpenTelemetry through a bundled Vector router; Jaeger in the box; tested Cribl, Datadog, Elastic and Splunk overlays; three stamped telemetry planes |
 | **Multi-tenancy** | Tenant scoping on every query, email/password plus Google and Microsoft SSO, JWT sessions, an audit log per run |
 | **Operations** | Secrets partitioned per process, `<NAME>_FILE` for container secret stores, sops + age encryption at rest, `librerun doctor`, `librerun key rotate` |
 
@@ -282,7 +282,7 @@ to build on it.
 | [`docs/platform/Security.md`](docs/platform/Security.md) | The trust model, tenancy, PII, where each secret lives, every flow that leaves the box |
 | [`docs/release/License_Scope_Map.md`](docs/release/License_Scope_Map.md) | Which licence covers which path, the provenance the tree can show, the maintainer's attestation |
 | [`docs/release/Distribution_Surface_Matrix.md`](docs/release/Distribution_Surface_Matrix.md) | Every source of bytes a source build fetches, how each is pinned, and who moves it next |
-| [`docs/platform/Observability.md`](docs/platform/Observability.md) | The telemetry planes and the Datadog, Elastic and Splunk overlays |
+| [`docs/platform/Observability.md`](docs/platform/Observability.md) | The telemetry planes and the Cribl, Datadog, Elastic and Splunk overlays |
 | [`docs/platform/Browser_Observability.md`](docs/platform/Browser_Observability.md) | The UX plane: the RUM envelope, the relay, the privacy model |
 
 | Authoring — building an agent | |
