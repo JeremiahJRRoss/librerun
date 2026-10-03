@@ -261,7 +261,7 @@ Where things land: events in your HEC index; traces in Splunk APM.
 
 ---
 
-## Something else
+## Cribl
 
 **Cribl** is a fourth overlay with its own switch: `VECTOR_CRIBL=1` in
 `.env`, then `./compose.sh --profile cribl up -d`. Since K4 its values
@@ -271,6 +271,7 @@ are split the same way this page's three vendors are —
 `observability-traces.env` — so neither process is handed the other's
 token. See `config/vector-cribl.yaml`.
 
+## Something else
 **Anything else with an OTLP endpoint** — Tempo, Honeycomb, Phoenix, a
 collector of your own — needs no overlay: point
 `VECTOR_JAEGER_ENDPOINT` at its OTLP/HTTP `/v1/traces` with the viewer
