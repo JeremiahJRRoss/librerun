@@ -104,46 +104,29 @@ from anything less, and the release page says plainly
 
 ---
 
-## Quick start
+## Quick start (Demo Mode) 
 
-A Linux machine with Docker or Podman running, and nothing else —
-LibreRun supports Linux only, not macOS or Windows. No `.env`, no
-provider key:
+### Network access
 
-```bash
-git clone https://github.com/JeremiahJRRoss/librerun.git && cd librerun
-./scripts/demo.sh
+Demo mode binds to 127.0.0.1. This is a design decision to prevent
+unintended exposure to the network. To reach a demo install from other
+machines, add the following lines to `.env` and restart with `compose.sh`.
+
+Lines to add:
+
+```
+FRONTEND_PORT=0.0.0.0:3000
+NEXT_PUBLIC_API_URL=/api/v1
+BACKEND_INTERNAL_URL=http://backend:8000
 ```
 
-> Working from a checkout you already have? Skip the clone. There are no
-> images to pull — a release is source only — so the script builds the
-> stack from this checkout, inside fifteen minutes: 3 min 34 s and 5 min
-> 5 s as measured on a CI runner.
+Command to run:
 
-The script writes a demo `.env` — a generated secret, a generated admin
-password, demo mode, the stub LLM, the five agents, a local Jaeger —
-builds and starts the stack, waits for the backend, then prints the URL,
-the credentials and the trace viewer's address.
+```bash
+./compose.sh --profile app --profile viewer --profile demo up -d --build --force-recreate
+```
 
-Open <http://localhost:3000>, sign in with the printed credentials, then:
-**+ New Run** → pick an agent card → **Try a sample** → submit → watch
-the steps → **Approve** at the gate → read the report → **View trace**.
-
-The stack needs ports 3000 and 8000 free, and 5432, 6379, 4317, 4318,
-8090 and 16686 on localhost; if another program holds one,
-[`docs/platform/Install.md` §11](docs/platform/Install.md#11-port-conflicts)
-moves it. If the script stops with an error, start at
-[Troubleshooting](docs/platform/Install.md#troubleshooting). Stop the
-stack with `./compose.sh down`, and add `-v` to delete its data as well.
-
-A banner says this is demo mode, which is not for production. To leave
-it: set a real `APP_SECRET_KEY`, unset `LIBRERUN_DEMO`, set
-`LIBRERUN_STUB_LLM=false`, and put your provider keys in `gateway.env`.
-[`docs/platform/Install.md`](docs/platform/Install.md) covers every mode,
-including running the backend and frontend as local processes.
-
-> `librerun demo` does the same thing once the CLI is installed — see
-> below.
+Open `http://<host-address>:3000`.
 
 ---
 
