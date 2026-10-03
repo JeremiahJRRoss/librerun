@@ -104,29 +104,363 @@ from anything less, and the release page says plainly
 
 ---
 
-## Quick start (Demo Mode) 
+## Quick start
 
-### Network access
+Choose one setup:
 
-Demo mode binds to 127.0.0.1. This is a design decision to prevent
-unintended exposure to the network. To reach a demo install from other
-machines, add the following lines to `.env` and restart with `compose.sh`.
+1. **Demo local** — try LibreRun on the host without API keys.
+2. **Demo Network** — access the demo from another machine.
+3. **Running with VITA** — run real investigations using your API keys.
 
-Lines to add:
+You need Linux, Git, and Docker Compose or Podman Compose. The secret-generation
+command in section 3 also requires Python 3.
 
+Clone the repository:
+
+```bash
+git clone https://github.com/JeremiahJRRoss/librerun.git
+cd librerun
 ```
+
+Run all commands below from this repository directory.
+
+### 1. Demo local
+
+Start the demo:
+
+```bash
+./scripts/demo.sh
+```
+
+On first run, the script generates the configuration and sign-in credentials,
+builds the containers, and starts the services. No model-provider API keys
+are required.
+
+Open `http://localhost:3000` on the host. Sign in using the credentials
+printed by the script.
+
+The demo uses fixture model responses. Its published ports bind to
+`127.0.0.1`, so other machines cannot access them.
+
+### 2. Demo Network
+
+Configure networking before the first build.
+
+Generate the demo configuration without starting the services:
+
+```bash
+./scripts/demo.sh --env-only
+```
+
+Add or update these entries in the generated `.env` file:
+
+```ini
 FRONTEND_PORT=0.0.0.0:3000
 NEXT_PUBLIC_API_URL=/api/v1
 BACKEND_INTERNAL_URL=http://backend:8000
 ```
 
-Command to run:
+Use these three values exactly as shown. Keep only one entry per variable.
+
+Build and start the demo:
 
 ```bash
-./compose.sh --profile app --profile viewer --profile demo up -d --build --force-recreate
+./scripts/demo.sh
 ```
 
-Open `http://<host-address>:3000`.
+From another machine, open:
+
+```text
+http://<host-address>:3000
+```
+
+Replace `<host-address>` with the reachable IP address or hostname of the
+machine running LibreRun:
+
+- IP example: `http://192.168.1.50:3000`
+- Hostname example: `http://vita.example.com:3000`
+
+A hostname must resolve to the LibreRun host from the machine using the browser.
+
+Sign in using `INITIAL_ADMIN_EMAIL` and `INITIAL_ADMIN_PASSWORD` from `.env`.
+Because the configuration was generated separately, the startup command
+refers you to the existing password in that file.
+
+The backend port and bundled Jaeger viewer remain bound to localhost.
+Browser API requests reach the backend through the frontend.
+
+> This setup serves plain HTTP on all host IPv4 interfaces. Use it on a
+> trusted network. For encrypted access, see
+> [HTTPS at the edge](docs/platform/Install.md#https-at-the-edge).
+
+### 3. Running with VITA
+
+VITA ships with LibreRun and runs with the `app` profile. Its default model
+configuration uses OpenAI and Anthropic. Tavily supplies web-search results.
+
+Use two configuration files:
+
+| File | Contents |
+|---|---|
+| `.env` | Application settings, database credentials, sign-in credentials, and Tavily key |
+| `gateway.env` | OpenAI, Anthropic, and optional Google AI keys |
+
+#### Step 1: Copy the sample files
+
+For a fresh installation:
+
+```bash
+cp .env.example .env
+cp gateway.env.example gateway.env
+chmod 600 .env gateway.env
+```
+
+If these files already exist, edit them instead of overwriting them.
+For an existing database, retain its database name, username, and password.
+
+Never commit files containing your credentials.
+
+#### Step 2: Generate application secrets and passwords
+
+Run this command once:
+
+```bash
+python3 - <<'PY'
+import secrets
+
+print("APP_SECRET_KEY=" + secrets.token_urlsafe(64))
+print("POSTGRES_PASSWORD=" + secrets.token_hex(32))
+print("INITIAL_ADMIN_PASSWORD='Admin-" + secrets.token_urlsafe(24) + "!7'")
+print("INITIAL_USER_PASSWORD='User-" + secrets.token_urlsafe(24) + "!7'")
+PY
+```
+
+The command prints four independently generated values. It does not edit
+your files.
+
+Copy the generated assignments into the matching entries in `.env`.
+The `INITIAL_USER_PASSWORD` value is needed only if you create the optional
+second account.
+
+Generate your own values; do not reuse credentials from example files.
+
+#### Step 3: Update `.env`
+
+Update the corresponding entries in your copied `.env` using this example.
+Replace every `<placeholder>` before starting.
+
+```ini
+# Application
+APP_ENV=staging
+APP_SECRET_KEY=<generated-app-secret>
+
+# Database — keep existing credentials when reusing a database
+POSTGRES_PASSWORD=<generated-database-password>
+
+# Admin sign-in
+CREDENTIALS_ENABLED=true
+INITIAL_ADMIN_EMAIL=<admin-email>
+INITIAL_ADMIN_PASSWORD='<generated-admin-password>'
+
+# Optional second account — leave both blank to skip
+INITIAL_USER_EMAIL=
+INITIAL_USER_PASSWORD=
+
+# VITA with real model responses
+LIBRERUN_DEMO=false
+LIBRERUN_STUB_LLM=false
+
+# Empty uses the bundled agents directory containing VITA
+LIBRERUN_AGENTS_PATH=
+
+# Web UI available from other machines
+FRONTEND_PORT=0.0.0.0:3000
+
+# Backend host port stays local; the frontend forwards API requests
+BACKEND_PORT=127.0.0.1:8000
+NEXT_PUBLIC_API_URL=/api/v1
+BACKEND_INTERNAL_URL=http://backend:8000
+
+# The complete browser origin: scheme + hostname/IP + port, without a path
+APP_CORS_ORIGINS=http://<host-address>:3000
+
+# VITA web search
+TAVILY_API_KEY=<tavily-api-key>
+
+# Optional observability integrations disabled for this basic setup
+VECTOR_VIEWER=
+VECTOR_CRIBL=
+LIBRERUN_OBS_VENDOR=
+TRACE_VIEWER=off
+
+# Normal logging; omit prompt/completion content from traces
+LOG_LEVEL=INFO
+OTEL_DEBUG=false
+OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=NO_CONTENT
+```
+
+Leave the remaining sample defaults unchanged. Do not add duplicate entries.
+
+**Values to replace:**
+
+| Variable | What to enter | Example or method |
+|---|---|---|
+| `APP_SECRET_KEY` | Generated application secret | Copy the matching output from step 2 |
+| `POSTGRES_PASSWORD` | Generated database password for a fresh database | Copy the matching output from step 2 |
+| `INITIAL_ADMIN_EMAIL` | Email address used for admin sign-in | `admin@example.com` |
+| `INITIAL_ADMIN_PASSWORD` | Generated admin password | Copy the matching output from step 2, including quotes |
+| `APP_CORS_ORIGINS` | Address you will use to open LibreRun | `http://192.168.1.50:3000` or `http://vita.example.com:3000` |
+| `TAVILY_API_KEY` | API key from your [Tavily account](https://tavily.com/) | Paste the complete issued key |
+| `INITIAL_USER_EMAIL` | Optional second account's email | `user@example.com`, or leave blank |
+| `INITIAL_USER_PASSWORD` | Optional second account's generated password | Copy the matching output from step 2, or leave blank |
+
+For example, if the host is `192.168.1.50`, use:
+
+```ini
+APP_CORS_ORIGINS=http://192.168.1.50:3000
+```
+
+Then open `http://192.168.1.50:3000` in your browser.
+
+Keep `NEXT_PUBLIC_API_URL=/api/v1` and
+`BACKEND_INTERNAL_URL=http://backend:8000` exactly as shown.
+`backend` is the container service name; do not replace it with your hostname.
+
+Tavily is optional, but leaving its key blank means VITA returns no
+web-search results.
+
+#### Step 4: Add model-provider keys to `gateway.env`
+
+Update these entries:
+
+```ini
+OPENAI_API_KEY=<openai-api-key>
+ANTHROPIC_API_KEY=<anthropic-api-key>
+
+# Optional — only needed if you configure a step to use Google AI
+GOOGLE_AI_API_KEY=
+```
+
+| Variable | Where to obtain the value |
+|---|---|
+| `OPENAI_API_KEY` | Create or copy a key from [OpenAI API keys](https://platform.openai.com/api-keys) |
+| `ANTHROPIC_API_KEY` | Create or copy a key from [Anthropic API keys](https://console.anthropic.com/settings/keys) |
+| `GOOGLE_AI_API_KEY` | If needed, create or copy a key from [Google AI Studio](https://aistudio.google.com/app/apikey) |
+
+Paste the complete issued keys, without angle brackets. These credentials
+come from the providers; the generation command in step 2 cannot create them.
+
+Model-provider keys belong in `gateway.env`. Putting them in `.env` does
+not pass them to the gateway.
+
+The other `gateway.env.example` settings can remain at their defaults
+when provider keys are supplied through this file.
+
+#### Step 5: Build and start VITA
+
+```bash
+./compose.sh --profile app up -d --build
+```
+
+Open `http://<host-address>:3000` and sign in with the admin email and password
+you configured.
+
+Select **VITA Vendor Troubleshooter**, start an investigation, and approve
+the review gate when prompted.
+
+To inspect service status or startup logs:
+
+```bash
+./compose.sh --profile app ps
+./compose.sh --profile app logs --tail=100 backend gateway frontend
+```
+
+Both `NEXT_PUBLIC_API_URL` and `BACKEND_INTERNAL_URL` are applied during the
+frontend build. After changing either, run the startup command again with
+`--build`.
+
+#### Optional: enable the local Jaeger viewer
+
+Update these entries in `.env`:
+
+```ini
+VECTOR_VIEWER=1
+TRACE_VIEWER=jaeger
+TRACE_VIEWER_BASE_URL=http://localhost:16686
+```
+
+Start with the additional profile:
+
+```bash
+./compose.sh --profile app --profile viewer up -d --build
+```
+
+Open `http://localhost:16686` on the LibreRun host. This address is local
+to the browser's machine; it will not reach the server from a remote browser.
+Changing `TRACE_VIEWER_BASE_URL` alone does not expose Jaeger's port.
+
+#### Optional: configure Cribl forwarding
+
+Cribl uses two additional files. Copy them if they do not already exist:
+
+```bash
+cp observability.env.example observability.env
+cp observability-traces.env.example observability-traces.env
+chmod 600 observability.env observability-traces.env
+```
+
+In `.env`, set:
+
+```ini
+VECTOR_CRIBL=1
+```
+
+In `observability.env`, uncomment and populate:
+
+```ini
+CRIBL_HEC_ENDPOINT=<cribl-hec-base-url>
+CRIBL_HEC_TOKEN=<cribl-hec-token>
+```
+
+In `observability-traces.env`, uncomment and populate:
+
+```ini
+CRIBL_OTLP_ENDPOINT=<cribl-otlp-host-and-port>
+CRIBL_OTLP_TOKEN=<cribl-otlp-token>
+```
+
+Replace the placeholders using your configured Cribl sources:
+
+| Variable | Required value | Illustrative format |
+|---|---|---|
+| `CRIBL_HEC_ENDPOINT` | HEC source base URL, including HTTPS and port, without a path | `https://default.main.example-org.cribl.cloud:8088` |
+| `CRIBL_HEC_TOKEN` | Token configured on the HEC source | Copy the source's authentication token |
+| `CRIBL_OTLP_ENDPOINT` | OpenTelemetry gRPC source hostname and port, without a path | `default.main.example-org.cribl.cloud:4317` |
+| `CRIBL_OTLP_TOKEN` | Token configured on the OpenTelemetry source | Copy the token; leave blank only when source authentication is disabled |
+
+The example hostnames are illustrative. Use the exact endpoints shown
+for your Cribl deployment.
+
+Start with the Cribl profile:
+
+```bash
+./compose.sh --profile app --profile cribl up -d --build
+```
+
+If also using Jaeger, include both optional profiles:
+
+```bash
+./compose.sh --profile app --profile viewer --profile cribl up -d --build
+```
+
+Check forwarding logs:
+
+```bash
+./compose.sh logs --tail=100 vector otel-bridge
+```
+
+Keep `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=NO_CONTENT` to omit
+LLM prompt and completion content from forwarded traces.
 
 ---
 
