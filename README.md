@@ -323,85 +323,47 @@ APP_CORS_ORIGINS=http://192.168.1.50:3000
 Then open `http://192.168.1.50:3000` in your browser.
 
 Keep `NEXT_PUBLIC_API_URL=/api/v1` and
-`BACKEND_INTERNAL_URL=http://backend:8000` exactly as shown.
-`backend` is the container service name; do not replace it with your hostname.
+`BACKEND_INTERNAL_URL=http://backend:8000` exactly as shown.#### Values to update in `.env`
 
-Tavily is optional, but leaving its key blank means VITA returns no
-web-search results.
+Keep one entry per variable. Replace all placeholders with your own values.
 
-#### Step 4: Add model-provider keys to `gateway.env`
+| Variable | How to set it | Example |
+|---|---|---|
+| `APP_SECRET_KEY` | Run `python3 -c "import secrets; print(secrets.token_urlsafe(64))"` and paste the printed value after `APP_SECRET_KEY=`. | `APP_SECRET_KEY=<generated-value>` |
+| `POSTGRES_PASSWORD` | For a fresh database, run `python3 -c "import secrets; print(secrets.token_hex(32))"` and paste the result. Retain the existing password when reusing a database. | `POSTGRES_PASSWORD=<generated-value>` |
+| `INITIAL_ADMIN_EMAIL` | Enter the email address you will use for admin sign-in. | `INITIAL_ADMIN_EMAIL=admin@example.com` |
+| `INITIAL_ADMIN_PASSWORD` | Enter your generated admin password. Enclose it in single quotes. | `INITIAL_ADMIN_PASSWORD='<generated-admin-password>'` |
+| `INITIAL_USER_EMAIL` | Optional second account. Leave blank if unused. | `INITIAL_USER_EMAIL=user@example.com` |
+| `INITIAL_USER_PASSWORD` | Use a different generated password for the second account. Leave blank if unused. | `INITIAL_USER_PASSWORD='<generated-user-password>'` |
+| `APP_CORS_ORIGINS` | Enter the exact browser origin: scheme, hostname or IP, and port. Omit the trailing slash and any path. | `APP_CORS_ORIGINS=http://vita.example.com:3000` |
+| `TAVILY_API_KEY` | Paste the complete API key issued by your Tavily account. Leave blank to disable web-search results. | `TAVILY_API_KEY=<your-tavily-key>` |
 
-Update these entries:
+For example, generate the application secret:
 
-```ini
-OPENAI_API_KEY=<openai-api-key>
-ANTHROPIC_API_KEY=<anthropic-api-key>
-
-# Optional — only needed if you configure a step to use Google AI
-GOOGLE_AI_API_KEY=
+```bash
+python3 -c "import secrets; print(secrets.token_urlsafe(64))"
 ```
 
-| Variable | Where to obtain the value |
+Copy the output into `.env`:
+
+```ini
+APP_SECRET_KEY=<paste-the-generated-value-here>
+```
+
+Generate a new value for each installation. Keep the same value across
+ordinary restarts.
+
+#### Optional: full Cribl example
+
+Cribl forwarding uses three files:
+
+| File | Settings |
 |---|---|
-| `OPENAI_API_KEY` | Create or copy a key from [OpenAI API keys](https://platform.openai.com/api-keys) |
-| `ANTHROPIC_API_KEY` | Create or copy a key from [Anthropic API keys](https://console.anthropic.com/settings/keys) |
-| `GOOGLE_AI_API_KEY` | If needed, create or copy a key from [Google AI Studio](https://aistudio.google.com/app/apikey) |
+| `.env` | Enable Cribl forwarding and configure logging and trace capture |
+| `observability.env` | Cribl HEC endpoint and token for logs |
+| `observability-traces.env` | Cribl OpenTelemetry gRPC endpoint and token for traces |
 
-Paste the complete issued keys, without angle brackets. These credentials
-come from the providers; the generation command in step 2 cannot create them.
-
-Model-provider keys belong in `gateway.env`. Putting them in `.env` does
-not pass them to the gateway.
-
-The other `gateway.env.example` settings can remain at their defaults
-when provider keys are supplied through this file.
-
-#### Step 5: Build and start VITA
-
-```bash
-./compose.sh --profile app up -d --build
-```
-
-Open `http://<host-address>:3000` and sign in with the admin email and password
-you configured.
-
-Select **VITA Vendor Troubleshooter**, start an investigation, and approve
-the review gate when prompted.
-
-To inspect service status or startup logs:
-
-```bash
-./compose.sh --profile app ps
-./compose.sh --profile app logs --tail=100 backend gateway frontend
-```
-
-Both `NEXT_PUBLIC_API_URL` and `BACKEND_INTERNAL_URL` are applied during the
-frontend build. After changing either, run the startup command again with
-`--build`.
-
-#### Optional: enable the local Jaeger viewer
-
-Update these entries in `.env`:
-
-```ini
-VECTOR_VIEWER=1
-TRACE_VIEWER=jaeger
-TRACE_VIEWER_BASE_URL=http://localhost:16686
-```
-
-Start with the additional profile:
-
-```bash
-./compose.sh --profile app --profile viewer up -d --build
-```
-
-Open `http://localhost:16686` on the LibreRun host. This address is local
-to the browser's machine; it will not reach the server from a remote browser.
-Changing `TRACE_VIEWER_BASE_URL` alone does not expose Jaeger's port.
-
-#### Optional: configure Cribl forwarding
-
-Cribl uses two additional files. Copy them if they do not already exist:
+Create the two additional files if they do not already exist:
 
 ```bash
 cp observability.env.example observability.env
@@ -409,58 +371,86 @@ cp observability-traces.env.example observability-traces.env
 chmod 600 observability.env observability-traces.env
 ```
 
-In `.env`, set:
+If the files already exist, update their entries instead of overwriting them.
+
+**In `.env`:**
 
 ```ini
+# Enable the Cribl forwarding configuration
 VECTOR_CRIBL=1
+
+# Leave the alternative vendor selector empty for this Cribl setup
+LIBRERUN_OBS_VENDOR=
+
+# Verbose application logging
+LOG_LEVEL=DEBUG
+
+# Print finished spans and exporter debug information to stderr
+OTEL_DEBUG=true
+
+# Include LLM prompts and completions in run-plane spans and events
+OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=SPAN_AND_EVENT
+
+# Keep application logging to stderr enabled
+LOG_STDERR_ENABLED=true
 ```
 
-In `observability.env`, uncomment and populate:
+This matches the verbose logging and content-capture settings in the example.
+To omit LLM prompts and completions from traces, use:
 
 ```ini
-CRIBL_HEC_ENDPOINT=<cribl-hec-base-url>
+OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=NO_CONTENT
+```
+
+**In `observability.env`:**
+
+```ini
+# Cribl HEC source: HTTPS base URL and port, without a path
+CRIBL_HEC_ENDPOINT=https://default.main.<cribl-org>.cribl.cloud:8088
+
+# Authentication token configured on the HEC source
 CRIBL_HEC_TOKEN=<cribl-hec-token>
 ```
 
-In `observability-traces.env`, uncomment and populate:
+**In `observability-traces.env`:**
 
 ```ini
-CRIBL_OTLP_ENDPOINT=<cribl-otlp-host-and-port>
+# Cribl OpenTelemetry source: gRPC hostname and port, without a path
+CRIBL_OTLP_ENDPOINT=default.main.<cribl-org>.cribl.cloud:4317
+
+# Authentication token configured on the OpenTelemetry source
 CRIBL_OTLP_TOKEN=<cribl-otlp-token>
 ```
 
-Replace the placeholders using your configured Cribl sources:
+**Values to replace:**
 
-| Variable | Required value | Illustrative format |
+| Variable | What to enter | Example or instructions |
 |---|---|---|
-| `CRIBL_HEC_ENDPOINT` | HEC source base URL, including HTTPS and port, without a path | `https://default.main.example-org.cribl.cloud:8088` |
-| `CRIBL_HEC_TOKEN` | Token configured on the HEC source | Copy the source's authentication token |
-| `CRIBL_OTLP_ENDPOINT` | OpenTelemetry gRPC source hostname and port, without a path | `default.main.example-org.cribl.cloud:4317` |
-| `CRIBL_OTLP_TOKEN` | Token configured on the OpenTelemetry source | Copy the token; leave blank only when source authentication is disabled |
+| `CRIBL_HEC_ENDPOINT` | The exact HTTPS base URL of your Cribl HEC source. | For an illustrative organization named `example-org`: `https://default.main.example-org.cribl.cloud:8088`. Use the endpoint shown by your deployment; omit `/services/collector` and other paths. |
+| `CRIBL_HEC_TOKEN` | The authentication token configured on your Cribl HEC source. | Copy the complete token from the source's authentication settings. |
+| `CRIBL_OTLP_ENDPOINT` | The exact hostname and port of your Cribl OpenTelemetry source configured for gRPC. | For the same illustrative organization: `default.main.example-org.cribl.cloud:4317`. No URL path. |
+| `CRIBL_OTLP_TOKEN` | The authentication token configured on your Cribl OpenTelemetry source. | Copy the complete token. Leave blank only when authentication is disabled on that source. |
 
-The example hostnames are illustrative. Use the exact endpoints shown
-for your Cribl deployment.
+The Cribl tokens come from your configured sources. They are separate
+credentials from LibreRun's generated `APP_SECRET_KEY`.
 
-Start with the Cribl profile:
+Start VITA with Cribl forwarding:
 
 ```bash
 ./compose.sh --profile app --profile cribl up -d --build
 ```
 
-If also using Jaeger, include both optional profiles:
+If Jaeger is also configured and enabled:
 
 ```bash
 ./compose.sh --profile app --profile viewer --profile cribl up -d --build
 ```
 
-Check forwarding logs:
+Inspect the forwarding logs:
 
 ```bash
 ./compose.sh logs --tail=100 vector otel-bridge
 ```
-
-Keep `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=NO_CONTENT` to omit
-LLM prompt and completion content from forwarded traces.
 
 ---
 
