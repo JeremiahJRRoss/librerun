@@ -1,6 +1,6 @@
 # LibreRun
 
-LibreRun is a self-hosted environment for learning how to design, develop, and operate services that use AI agents.
+LibreRun is a self-hosted educational environment for learning how to design, develop, and operate services that use AI agents.
 
 A request enters through an interface. An agent processes it, calls models and tools, and produces a result. The surrounding service must control access, protect data, obtain approval, and record what happened. LibreRun provides these components so you can study and develop the complete service.
 
