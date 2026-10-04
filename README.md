@@ -1,158 +1,233 @@
 # LibreRun
 
-**LibreRun is an educational software environment for teaching the
-design, development and operation of AI agents using multiple
-agent-development frameworks. Its scope is agent conception and
-planning, framework selection, security, operating environments,
-observability, evaluation and optimization. Its architecture uses
-Docker Compose or Podman Compose to orchestrate its containers within a
-Linux virtual machine.**
+LibreRun is a self-hosted environment for learning how to design, develop, and operate services that use AI agents.
 
-At its centre is a self-hosted chassis for AI agents, built for
-educational purposes: a complete, working platform to learn from — how
-an agent is conceived, what a framework gives it and what the platform
-gives instead, how a run is observed, where the security boundaries
-lie, and what an agent needs from the environment it runs in. The
-chassis is real, not a mock: intake, a human approval gate, PII
-redaction before anything is stored, per-step model configuration,
-reports and one trace per run. You bring an agent, or study the five in
-the box, and LibreRun brings everything around it.
+A request enters through an interface. An agent processes it, calls models and tools, and produces a result. The surrounding service must control access, protect data, obtain approval, and record what happened. LibreRun provides these components so you can study and develop the complete service.
 
-Two things the scope names are taught otherwise. Agent conception and
-planning are taught in person; the tree carries the anatomy of an agent.
-Evaluation and optimization are taught with the chassis's own
-instruments — the gateway, which is the
-LLM router every model call passes through; the edge proxy; the cache;
-and the tracing and observability tools, all designed to teach
-evaluation — and the pages that teach them are not written yet:
-[what 1.0 does not do yet](#what-10-does-not-do-yet) says so. LibreRun
-runs on Linux only.
+## 1. Overview
 
-An agent plugs in as a self-contained package — a manifest, an input
-schema, and the phases it runs — and inherits the whole platform without
-building any of it. The chassis knows nothing about any particular agent:
-the run list, the gate, the report page and the traces are the same for
-every agent, driven by what its manifest declares.
+### Why it exists
 
-Five agents ship in the box, all keyless: **VITA**, the demo agent that
-investigates cross-vendor integration failures, which comes pre-loaded
-and runs the moment the stack is up; an **echo** reference agent; and
-**LangGraph**, **LlamaIndex** and **Vercel AI SDK** examples.
+LibreRun teaches the environmental, tooling, and user-experience considerations of agent service design:
 
-**DOCI** is an add-on agent, installed as a module rather than shipped
-in the box: it is maintained separately at
-<https://github.com/JeremiahJRRoss/librerun-doci> and plugs into a
-running LibreRun the way any agent does.
+- **Environment:** processes, containers, networks, credentials, and storage.
+- **Tools:** model routing, external services, configuration, and observability.
+- **User experience:** input, progress, human review, results, and feedback.
 
----
+### What it provides
 
-## The three promises
+| Component | What it does |
+|---|---|
+| Web interface | Generates forms from an agent’s input schema. Displays runs, progress, approval controls, results, and feedback. |
+| Agent runtime | Discovers agents, executes their phases, enforces deadlines, and waits for approval where declared. |
+| LLM gateway and router | Routes declared model steps to configured providers. Holds provider credentials and applies request controls and outbound redaction. |
+| HTTPS reverse proxy | An optional Caddy service provides HTTPS and routes browser requests to the frontend or API. |
+| PII redaction | Detects supported personally identifiable information in input and at persistence, telemetry, and model-request boundaries. |
+| Platform services | Provide knowledge search, temporary run storage, audit records, agent configuration, and tool-secret retrieval. |
+| Storage | PostgreSQL stores application records. Valkey provides temporary state and caching. |
+| Reports | Display structured results or agent-supplied HTML. Export results as HTML or PDF; PDF generation falls back to HTML if rendering fails. |
+| Observability | OpenTelemetry records activity. Vector routes telemetry. Jaeger provides the included trace viewer. |
+| Development tools | Provide agent templates, a Python SDK, a LangGraph adapter, a command-line interface, and conformance checks. |
+| Access management | Provides authentication, roles, and tenant-scoped application records and configuration. |
 
-### 1. Five minutes to a gated, traced run — no keys, no config
+A **tenant** is a group with its own users, records, and configuration.
 
-`git clone`, one command, log in with the printed credentials, click a
-sample, watch the run, approve the gate, read the report, open the trace.
-All five bundled agents run keyless through the gateway's built-in stub
-provider, so the whole loop is visible before a single provider key
-exists.
+### Included agents
 
-### 2. Your agent in an hour, and the platform snaps in
-
-Two paths, both proven by CI: a **LangGraph** graph in-process through
-`librerun-langgraph`, or **any language, any framework** as a container
-on the [Run Contract](docs/authoring/Run_Contract_v1.md) with the
-`librerun-agent` Python SDK — TypeScript authors get a complete
-reference server in a single file. Through the SDK your agent gets the
-platform's services without building them: PII stripping, the model
-chosen per step in the admin UI, knowledge search, run storage, audit.
-Every model call goes through the **LibreRun gateway**, so your agent
-never holds a provider key. `librerun init` scaffolds either path;
-`librerun battery` tells you when you are done.
-
-### 3. Every run is one trace, in the tool you already use
-
-Jaeger in the box: one tree from intake through your agent's own spans,
-with the model, tokens and cost of every LLM call on it. An audit log
-per run. PII redacted before anything is stored — and tested overlays
-that ship the same traces and logs to  **Cribl,** **Datadog**, **Elastic** or
-**Splunk**.
-
----
-
-## What you learn here
-
-LibreRun exists to be read as much as run. Each concern around an agent
-is built the way a production system builds it, tested, and documented
-against the tree: the documentation workflow in CI fails on a command
-that does not run, a link that breaks or a spec that has drifted, so a
-page here says what the code does, not what it promises.
-
-| Scope | You learn | Where the tree teaches it |
+| Agent | Runtime | Purpose |
 |---|---|---|
-| **Agent conception and planning** | Taught in person. The tree carries the anatomy — an agent's manifest, its phases and steps, the gate between phases, and the invariants the chassis holds for every agent | [`docs/authoring/Agents_Design.md`](docs/authoring/Agents_Design.md) and [`docs/authoring/Manifest.md`](docs/authoring/Manifest.md) |
-| **Framework selection** | What a framework gives an agent and what the chassis gives instead: one small agent as three templates — in-process on LangGraph, a Python container on the SDK, a TypeScript container on the Run Contract — and four examples, on LangGraph, LlamaIndex, the Vercel AI SDK and the echo agent on the Python SDK; PII redaction, the model chosen per step, the gate and the trace come from the chassis whichever you pick. The rules the tree states for the choice: an agent you do not trust runs in a container, an existing graph runs in-process, any other language serves the Run Contract. A page that compares the frameworks is not written yet | the three templates in [`docs/authoring/Quickstart.md`](docs/authoring/Quickstart.md), the four examples under `backend/agents/_examples/`, [`docs/authoring/LangGraph.md`](docs/authoring/LangGraph.md), [the trust model](docs/platform/Security.md#the-runtime-trust-model-in-three-lines), [`docs/authoring/Run_Contract_v1.md`](docs/authoring/Run_Contract_v1.md), and the conformance battery that says when an agent is done |
-| **Security** | Where the boundaries lie — the trust model in three lines, tenancy on every query, PII redaction that fails closed, the gateway as the only process that holds a provider key, and what is *not* protected | [`docs/platform/Security.md`](docs/platform/Security.md#the-runtime-trust-model-in-three-lines), [`docs/authoring/LLM_Gateway.md`](docs/authoring/LLM_Gateway.md), [`SECURITY.md`](SECURITY.md) |
-| **Operating environments** | What an agent needs from the environment it runs in — Linux only; Docker Compose or Podman Compose orchestrating the containers, typically inside a Linux virtual machine; the run modes, the ports, what a container agent can reach and the egress its manifest declares, which secret lives in which process, the per-OS install layer, and `librerun doctor` | [`docs/platform/Install.md`](docs/platform/Install.md), [`docs/platform/Install_CentOS_Ubuntu.md`](docs/platform/Install_CentOS_Ubuntu.md), [`docs/authoring/Container_Agents.md`](docs/authoring/Container_Agents.md), [what a container agent can reach](docs/platform/Security.md#what-a-container-agent-can-reach) |
-| **Observability** | How a run is observed — one trace per run across the gate, the model, tokens and cost of every LLM call, three stamped telemetry planes, and the same telemetry into Jaeger, Cribl,  Datadog, Elastic or Splunk. The tracing and observability tools are designed to teach evaluation as well | [`docs/platform/Observability.md`](docs/platform/Observability.md), [`docs/platform/Browser_Observability.md`](docs/platform/Browser_Observability.md) |
-| **Evaluation** | Taught with the core code's instruments, which are designed for it: the gateway — the LLM router, one span per call with model, tokens and cost — the edge proxy, the cache, the trace, the scenarios, the feedback thumbs and the conformance battery. The pages that teach evaluation with them are not written yet, and 1.0 has no scored runs | [`docs/authoring/LLM_Gateway.md`](docs/authoring/LLM_Gateway.md), [`docs/platform/Observability.md`](docs/platform/Observability.md), [HTTPS at the edge](docs/platform/Install.md#https-at-the-edge), [what 1.0 does not do yet](#what-10-does-not-do-yet) |
-| **Optimization** | Taught with the same instruments: the model, temperature, token limit and timeout chosen per step in the admin UI with nothing restarted, and the cost on every LLM span. The pages are not written yet; a cost panel, smart routing and budgets are v1.2 | [`docs/authoring/Quickstart.md` §6](docs/authoring/Quickstart.md#6-change-the-model-without-touching-code), [`docs/authoring/LLM_Gateway.md`](docs/authoring/LLM_Gateway.md), [the roadmap](docs/release/v1.0.0.md#roadmap) |
+| VITA | Python inside the backend | Investigates interoperability problems between two vendor products. Includes a human approval step. |
+| Echo | Python container | Demonstrates the Python SDK and container contract. |
+| LangGraph Triage | LangGraph inside the backend | Demonstrates graph integration. |
+| LlamaIndex Summarize | Python container | Demonstrates a LlamaIndex workflow with separate extraction and summarisation steps. |
+| Vercel AI SDK Answer | TypeScript container | Demonstrates the execution contract and model access through the Vercel AI SDK. |
 
-None of this makes the chassis a toy. It is built and tested the way a
-production system is, because production practice cannot be learned
-from anything less, and the release page says plainly
-[what 1.0 does not do yet](docs/release/v1.0.0.md#what-10-does-not-do-yet).
+The standard application configuration discovers VITA. The demo configuration also discovers the four examples and starts their required containers.
 
----
+All five can use the gateway’s fixed test responses without model-provider keys.
 
-## Quick start
+### DOCI
 
-Choose one setup:
+[DOCI — Debug Observability and Codebase Inspector](https://github.com/JeremiahJRRoss/librerun-doci) is a separately maintained support-agent project. It investigates tickets using observability evidence, known issues, and source code, then produces a diagnosis and drafts for human review.
 
-1. **Demo local** — try LibreRun on the host without API keys.
-2. **Demo Network** — access the demo from another machine.
-3. **Running with VITA** — run real investigations using your API keys.
+Its current evaluation build uses Deep Agents and Arcade.dev. Its [LibreRun integration remains planned](https://github.com/JeremiahJRRoss/librerun-doci/blob/main/docs/BUILD_STATUS.md). DOCI is not included in the LibreRun installation described here.
 
-You need Linux, Git, and Docker Compose or Podman Compose. The secret-generation
-command in section 3 also requires Python 3.
+### When to use LibreRun
 
-Clone the repository:
+Use LibreRun to:
+
+- Learn what an agent needs from its operating environment.
+- Develop agents with input, approval, reporting, and telemetry already available.
+- Compare framework integration approaches.
+- Inspect model calls, execution time, token usage, errors, and available cost estimates.
+- Study how user input and human review affect a service.
+
+Conformance checks verify integration behaviour. They do not score answer quality.
+
+### Where it runs
+
+The server runs on Linux, directly or inside a Linux virtual machine. It is intended for a small personal Linux server or a sufficiently capable Linux desktop.
+
+Docker Compose or Podman Compose manages the containers. Native Windows, macOS, Docker Desktop, and WSL2 deployments are outside the project’s supported server environments.
+
+The project does not publish a verified minimum for processor count, memory, or disk space. Capacity depends on the enabled services, image builds, and concurrent runs.
+
+### Who uses it
+
+**Users** submit requests, review intermediate results, approve work, and read reports.
+
+**Developers** implement agents and connect interfaces. The included interface uses forms and run pages. A developer can connect a chat interface through the API; LibreRun does not currently include one.
+
+**Administrators** manage accounts, model settings, credentials, and the installation.
+
+## 2. How agents work
+
+### The agent package
+
+An agent declares its behaviour through three main elements:
+
+| Element | Responsibility |
+|---|---|
+| `agent.yaml` | Identity, runtime, phases, approval requirements, capabilities, model steps, and output mode. |
+| Input schema | Required fields, types, and validation rules. The web interface uses it to generate the form. |
+| Implementation | The code that executes each phase and produces its output. |
+
+The backend discovers agents at startup. A changed manifest or newly added agent must reach the backend image, followed by a backend restart.
+
+### The run lifecycle
+
+A **run** is one submitted request. A **phase** is a declared part of that run. An **invocation** is one execution of a phase.
+
+1. The user selects an agent and submits input.
+2. LibreRun validates and redacts the input.
+3. The runtime invokes the first phase.
+4. The agent reports progress and returns a result.
+5. LibreRun either starts the next phase or waits for approval.
+6. At an approval gate, the user approves the result or supplies edits and repeats the phase under review.
+7. The final phase produces the completed result.
+
+Declare approval on the phase that must wait:
+
+```yaml
+phases:
+  - name: analyze
+  - name: investigate
+    approval: true
+```
+
+LibreRun completes `analyze`, presents its output, and waits before invoking `investigate`.
+
+The first phase cannot require approval. Submission authorises it. The current release supports approval between phases, without interactive human input during a phase.
+
+The browser polls unfinished runs approximately every two seconds. Container agents stream events to the backend using server-sent events; that stream is separate from browser polling.
+
+A backend restart interrupts executing phases. The platform marks interrupted runs as errors; it does not automatically resume those phases.
+
+### Execution options
+
+| Option | Implementation | Platform access |
+|---|---|---|
+| In process | Python code running inside the backend. A supplied adapter supports LangGraph. | Python capability interfaces. |
+| Container | A separate, running service implementing Run Contract v1. | HTTP, server-sent events, and run-scoped Model Context Protocol tools. |
+
+In-process agents share the backend’s process privileges. Capability declarations do not isolate their code.
+
+Container templates join an internal agent network. They reach the backend and model gateway, but have no direct internet access by default. An agent that needs internet access must declare `network.egress: true` and join the `egress` network in its Compose service.
+
+Compose starts agent containers. The backend invokes them at the URLs declared in their manifests.
+
+### Model routing and credentials
+
+An agent calls a declared step, such as `analyze`. The gateway resolves that step’s provider, model, temperature, token limit, and timeout from the tenant’s configuration.
+
+The administrator changes these values on the agent’s **Steps** tab. The next request uses the effective configuration without rebuilding the agent.
+
+| Credential | Purpose |
+|---|---|
+| Provider key | Authenticates the gateway to a model provider. Held by the gateway. |
+| LibreRun agent key | Identifies an agent. Framework clients may receive it as `OPENAI_API_KEY`. It does not independently authorise a model call. |
+| Run token | Identifies the current invocation, run, tenant, and agent. Required for model calls and run-scoped platform access. |
+| Tool secret | Authenticates an agent to a separate service, such as web search. Declared in the agent manifest. |
+
+Framework clients use the gateway’s OpenAI-compatible Chat Completions interface and a model value such as `librerun/analyze`.
+
+Routing follows configured steps. Automatic selection based on cost or answer quality is not implemented.
+
+The gateway records token usage when available and calculates USD cost estimates when usage and pricing information are available. Demo calls can contain simulated estimates; they do not represent provider charges.
+
+## 3. Commands and profiles
+
+Run commands from the repository root.
+
+Use `./compose.sh` to manage services. It selects Docker Compose or Podman Compose, prepares the gateway’s agent-key file, and checks configuration required by the HTTPS profile.
+
+The scripts and CLI use this wrapper:
+
+| Command | Role |
+|---|---|
+| `./scripts/demo.sh` | Prepares demo configuration where needed, provisions keys, starts demo services, and checks startup. |
+| `./compose.sh …` | Builds, starts, inspects, and stops selected services. |
+| `librerun init` | Creates an agent from a template. |
+| `librerun run` | Submits an agent’s sample request. |
+| `librerun battery` | Runs agent conformance checks. |
+| `librerun doctor` | Inspects installation and configuration. |
+
+The optional `librerun up` command also exists. It provisions missing agent keys, calls `compose.sh` with `app`, `viewer`, `demo`, and `agents`, and checks startup. The instructions below use `compose.sh` explicitly.
+
+### Profiles
+
+| Profile | Adds |
+|---|---|
+| `app` | Backend and frontend. |
+| `viewer` | Jaeger. |
+| `demo` | Echo, LlamaIndex, and Vercel example containers. |
+| `agents` | Container services created by `librerun init`. |
+| `tls` | Caddy and its certificate-control service. |
+
+PostgreSQL, Valkey, Vector, and the gateway have no profile restriction and participate in a normal `up`.
+
+Profiles select services. They do not change model mode or agent discovery. For example, `--profile demo` does not set `LIBRERUN_STUB_LLM=true`.
+
+## 4. Quick start
+
+You need Linux, Git, and a compatible container runtime. The first build downloads images and dependencies.
+
+For Docker, use Engine 24 or later and Compose 2.24.0 or later. The current Compose file uses `env_file.required`, introduced in Compose 2.24.0. See [Docker’s environment-file documentation](https://docs.docker.com/compose/how-tos/environment-variables/set-environment-variables/).
+
+The wrapper also supports Podman. A verified minimum Podman and podman-compose combination is not established by this source review; validate the configuration with your installed versions before relying on them.
+
+### Local demo
 
 ```bash
 git clone https://github.com/JeremiahJRRoss/librerun.git
 cd librerun
-```
-
-Run all commands below from this repository directory.
-
-### 1. Demo local
-
-Start the demo:
-
-```bash
 ./scripts/demo.sh
 ```
 
-On first run, the script generates the configuration and sign-in credentials,
-builds the containers, and starts the services. No model-provider API keys
-are required.
+On a fresh checkout, the script creates configuration, generates credentials, builds the services, and starts the demo.
 
-Open `http://localhost:3000` on the host. Sign in using the credentials
-printed by the script.
+Open [http://localhost:3000](http://localhost:3000). Sign in with the printed credentials.
 
-The demo uses fixture model responses. Its published ports bind to
-`127.0.0.1`, so other machines cannot access them.
+1. Select a VITA sample.
+2. Review and submit the input.
+3. Wait for the first phase.
+4. Review its result and approve the investigation.
+5. Open the completed report.
+6. Follow **View trace** to Jaeger.
 
-### 2. Demo Network
+The fresh demo uses fixed model responses and binds published ports to the local machine.
 
-Configure networking before the first build.
+If `.env` already exists, the script preserves its settings. Running the script does not automatically convert an existing installation to demo or stub mode.
 
-Generate the demo configuration without starting the services:
+### Demo from another machine
+
+Before the first build:
 
 ```bash
 ./scripts/demo.sh --env-only
 ```
 
-Add or update these entries in the generated `.env` file:
+Set these entries in `.env`:
 
 ```ini
 FRONTEND_PORT=0.0.0.0:3000
@@ -160,52 +235,46 @@ NEXT_PUBLIC_API_URL=/api/v1
 BACKEND_INTERNAL_URL=http://backend:8000
 ```
 
-Use these three values exactly as shown. Keep only one entry per variable.
-
-Build and start the demo:
+Keep one entry per variable, then start:
 
 ```bash
 ./scripts/demo.sh
 ```
 
-From another machine, open:
-
-```text
-http://<host-address>:3000
-```
-
-Replace `<host-address>` with the reachable IP address or hostname of the
-machine running LibreRun:
-
-- IP example: `http://192.168.1.50:3000`
-- Hostname example: `http://vita.example.com:3000`
-
-A hostname must resolve to the LibreRun host from the machine using the browser.
+Open `http://<host-address>:3000` from the client machine. Replace `<host-address>` with the server’s reachable IP address or hostname.
 
 Sign in using `INITIAL_ADMIN_EMAIL` and `INITIAL_ADMIN_PASSWORD` from `.env`.
-Because the configuration was generated separately, the startup command
-refers you to the existing password in that file.
 
-The backend port and bundled Jaeger viewer remain bound to localhost.
-Browser API requests reach the backend through the frontend.
+This exposes the frontend over plain HTTP. Use it on a trusted network. The backend and Jaeger remain local to the server.
 
-> This setup serves plain HTTP on all host IPv4 interfaces. Use it on a
-> trusted network. For encrypted access, see
-> [HTTPS at the edge](docs/platform/Install.md#https-at-the-edge).
+### VITA with real models
 
-### 3. Running with VITA
+Use the full installation below. VITA’s default steps use OpenAI and Anthropic. Tavily supplies optional web-search results.
 
-VITA ships with LibreRun and runs with the `app` profile. Its default model
-configuration uses OpenAI and Anthropic. Tavily supplies web-search results.
+## 5. Full installation
 
-Use two configuration files:
+This procedure runs all application services in containers and enables local trace viewing.
 
-| File | Contents |
-|---|---|
-| `.env` | Application settings, database credentials, sign-in credentials, and Tavily key |
-| `gateway.env` | OpenAI, Anthropic, and optional Google AI keys |
+For a fresh installation, create new credentials. When configuring an existing installation, preserve its database credentials, application secret, and encryption keys. Generate only missing values.
 
-#### Step 1: Copy the sample files
+### 5.1 Prepare the host and checkout
+
+Install:
+
+- Git and a compatible container runtime.
+- Python 3 for secret generation and JSON inspection.
+- `curl` for the checks below.
+
+Python and Node.js used by the application are installed inside its images.
+
+```bash
+git clone https://github.com/JeremiahJRRoss/librerun.git
+cd librerun
+```
+
+If the checkout already exists, use it.
+
+### 5.2 Create configuration files
 
 For a fresh installation:
 
@@ -215,431 +284,669 @@ cp gateway.env.example gateway.env
 chmod 600 .env gateway.env
 ```
 
-If these files already exist, edit them instead of overwriting them.
-For an existing database, retain its database name, username, and password.
+Edit existing files instead of overwriting them.
 
-Never commit files containing your credentials.
+| File | Contents |
+|---|---|
+| `.env` | Application settings, database credentials, bootstrap accounts, backend encryption key, and tool credentials. |
+| `gateway.env` | Provider credentials and the gateway encryption key. |
 
-#### Step 2: Generate application secrets and passwords
+Keep these files out of version control.
 
-Run this command once:
+### 5.3 Generate secrets
+
+For a new installation:
 
 ```bash
 python3 - <<'PY'
+import base64
 import secrets
+
+def encryption_key():
+    return base64.urlsafe_b64encode(secrets.token_bytes(32)).decode()
 
 print("APP_SECRET_KEY=" + secrets.token_urlsafe(64))
 print("POSTGRES_PASSWORD=" + secrets.token_hex(32))
 print("INITIAL_ADMIN_PASSWORD='Admin-" + secrets.token_urlsafe(24) + "!7'")
-print("INITIAL_USER_PASSWORD='User-" + secrets.token_urlsafe(24) + "!7'")
+print("LIBRERUN_BACKEND_SECRETS_KEY=" + encryption_key())
+print("LIBRERUN_GATEWAY_SECRETS_KEY=" + encryption_key())
 PY
 ```
 
-The command prints four independently generated values. It does not edit
-your files.
+Copy the complete assignments into their files:
 
-Copy the generated assignments into the matching entries in `.env`.
-The `INITIAL_USER_PASSWORD` value is needed only if you create the optional
-second account.
+- First four assignments: `.env`.
+- `LIBRERUN_GATEWAY_SECRETS_KEY`: `gateway.env`.
 
-Generate your own values; do not reuse credentials from example files.
+The command prints values without editing files.
 
-#### Step 3: Update `.env`
+The two encryption keys enable stored credentials in the administration interface. They must differ. Preserve them with database backups.
 
-Update the corresponding entries in your copied `.env` using this example.
-Replace every `<placeholder>` before starting.
+### 5.4 Configure the application
+
+Set the following in `.env`. Replace placeholders and retain one entry per variable.
 
 ```ini
-# Application
 APP_ENV=staging
-APP_SECRET_KEY=<generated-app-secret>
+APP_SECRET_KEY=<generated-application-secret>
 
-# Database — keep existing credentials when reusing a database
+POSTGRES_DB=librerun
+POSTGRES_USER=librerun
 POSTGRES_PASSWORD=<generated-database-password>
 
-# Admin sign-in
-CREDENTIALS_ENABLED=true
-INITIAL_ADMIN_EMAIL=<admin-email>
-INITIAL_ADMIN_PASSWORD='<generated-admin-password>'
+LIBRERUN_BACKEND_SECRETS_KEY=<generated-backend-encryption-key>
 
-# Optional second account — leave both blank to skip
+CREDENTIALS_ENABLED=true
+INITIAL_ADMIN_EMAIL=<your-email-address>
+INITIAL_ADMIN_PASSWORD='<generated-admin-password>'
 INITIAL_USER_EMAIL=
 INITIAL_USER_PASSWORD=
 
-# VITA with real model responses
 LIBRERUN_DEMO=false
 LIBRERUN_STUB_LLM=false
-
-# Empty uses the bundled agents directory containing VITA
 LIBRERUN_AGENTS_PATH=
+LIBRERUN_PII_ALLOW_DEGRADED=false
 
-# Web UI available from other machines
-FRONTEND_PORT=0.0.0.0:3000
-
-# Backend host port stays local; the frontend forwards API requests
+FRONTEND_PORT=127.0.0.1:3000
 BACKEND_PORT=127.0.0.1:8000
 NEXT_PUBLIC_API_URL=/api/v1
 BACKEND_INTERNAL_URL=http://backend:8000
+APP_CORS_ORIGINS=http://localhost:3000
 
-# The complete browser origin: scheme + hostname/IP + port, without a path
-APP_CORS_ORIGINS=http://<host-address>:3000
+TAVILY_API_KEY=
 
-# VITA web search
-TAVILY_API_KEY=<tavily-api-key>
-
-# Optional observability integrations disabled for this basic setup
-VECTOR_VIEWER=
+VECTOR_VIEWER=1
+TRACE_VIEWER=jaeger
+TRACE_VIEWER_BASE_URL=http://localhost:16686
 VECTOR_CRIBL=
 LIBRERUN_OBS_VENDOR=
-TRACE_VIEWER=off
 
-# Normal logging; omit prompt/completion content from traces
 LOG_LEVEL=INFO
 OTEL_DEBUG=false
 OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=NO_CONTENT
 ```
 
-Leave the remaining sample defaults unchanged. Do not add duplicate entries.
+Leave other sample settings unchanged.
 
-**Values to replace:**
+Important settings:
 
-| Variable | What to enter | Example or method |
-|---|---|---|
-| `APP_SECRET_KEY` | Generated application secret | Copy the matching output from step 2 |
-| `POSTGRES_PASSWORD` | Generated database password for a fresh database | Copy the matching output from step 2 |
-| `INITIAL_ADMIN_EMAIL` | Email address used for admin sign-in | `admin@example.com` |
-| `INITIAL_ADMIN_PASSWORD` | Generated admin password | Copy the matching output from step 2, including quotes |
-| `APP_CORS_ORIGINS` | Address you will use to open LibreRun | `http://192.168.1.50:3000` or `http://vita.example.com:3000` |
-| `TAVILY_API_KEY` | API key from your [Tavily account](https://tavily.com/) | Paste the complete issued key |
-| `INITIAL_USER_EMAIL` | Optional second account's email | `user@example.com`, or leave blank |
-| `INITIAL_USER_PASSWORD` | Optional second account's generated password | Copy the matching output from step 2, or leave blank |
+- Empty `LIBRERUN_AGENTS_PATH` uses the standard agents directory, containing VITA and any agents you add there.
+- `LIBRERUN_DEMO` controls demo behaviour. `LIBRERUN_STUB_LLM` independently controls fixed model responses.
+- Add `TAVILY_API_KEY` to enable VITA’s web search. Without it, VITA has no web-search results.
+- Fill both `INITIAL_USER_*` values to create an optional second account. Use a separate password.
+- `NO_CONTENT` omits model prompt and completion content from trace capture.
 
-For example, if the host is `192.168.1.50`, use:
+### 5.5 Configure providers
+
+Set these entries in `gateway.env`:
 
 ```ini
-APP_CORS_ORIGINS=http://192.168.1.50:3000
+LIBRERUN_GATEWAY_SECRETS_KEY=<generated-gateway-encryption-key>
+OPENAI_API_KEY=<your-openai-key>
+ANTHROPIC_API_KEY=<your-anthropic-key>
+GOOGLE_AI_API_KEY=
 ```
 
-Then open `http://192.168.1.50:3000` in your browser.
+Supply credentials for every provider your configured steps use. VITA’s defaults reference OpenAI and Anthropic.
 
-Keep `NEXT_PUBLIC_API_URL=/api/v1` and
-`BACKEND_INTERNAL_URL=http://backend:8000` exactly as shown.#### Values to update in `.env`
+Leave unused provider entries blank. To use fixed responses, set `LIBRERUN_STUB_LLM=true` in `.env`; adding provider keys alone does not disable stub mode.
 
-Keep one entry per variable. Replace all placeholders with your own values.
+### 5.6 Validate, build, and start
 
-| Variable | How to set it | Example |
-|---|---|---|
-| `APP_SECRET_KEY` | Run `python3 -c "import secrets; print(secrets.token_urlsafe(64))"` and paste the printed value after `APP_SECRET_KEY=`. | `APP_SECRET_KEY=<generated-value>` |
-| `POSTGRES_PASSWORD` | For a fresh database, run `python3 -c "import secrets; print(secrets.token_hex(32))"` and paste the result. Retain the existing password when reusing a database. | `POSTGRES_PASSWORD=<generated-value>` |
-| `INITIAL_ADMIN_EMAIL` | Enter the email address you will use for admin sign-in. | `INITIAL_ADMIN_EMAIL=admin@example.com` |
-| `INITIAL_ADMIN_PASSWORD` | Enter your generated admin password. Enclose it in single quotes. | `INITIAL_ADMIN_PASSWORD='<generated-admin-password>'` |
-| `INITIAL_USER_EMAIL` | Optional second account. Leave blank if unused. | `INITIAL_USER_EMAIL=user@example.com` |
-| `INITIAL_USER_PASSWORD` | Use a different generated password for the second account. Leave blank if unused. | `INITIAL_USER_PASSWORD='<generated-user-password>'` |
-| `APP_CORS_ORIGINS` | Enter the exact browser origin: scheme, hostname or IP, and port. Omit the trailing slash and any path. | `APP_CORS_ORIGINS=http://vita.example.com:3000` |
-| `TAVILY_API_KEY` | Paste the complete API key issued by your Tavily account. Leave blank to disable web-search results. | `TAVILY_API_KEY=<your-tavily-key>` |
-
-For example, generate the application secret:
+Check whether the installed Compose implementation accepts the configuration:
 
 ```bash
-python3 -c "import secrets; print(secrets.token_urlsafe(64))"
+./compose.sh --profile app --profile viewer config > /dev/null
 ```
 
-Copy the output into `.env`:
+Resolve any reported error before starting.
+
+```bash
+./compose.sh --profile app --profile viewer up -d --build
+./compose.sh --profile app --profile viewer ps
+```
+
+The backend applies migrations before serving requests. It also attempts to create the configured accounts.
+
+### 5.7 Verify readiness
+
+Check the backend:
+
+```bash
+curl -fsS http://localhost:8000/api/v1/health \
+  | python3 -m json.tool
+```
+
+Confirm:
+
+```json
+"pii_detector": {
+  "state": "ready",
+  "coverage": "ner"
+}
+```
+
+Other fields will also be present. The top-level `"status": "ok"` alone does not establish that redaction is ready.
+
+Check gateway reachability and model mode:
+
+```bash
+curl -fsS http://localhost:8000/api/v1/meta \
+  | python3 -m json.tool
+```
+
+For this installation, confirm:
+
+```json
+"gateway": "ok",
+"stub_llm": false,
+"trace_viewer_configured": true
+```
+
+Check the gateway’s own redaction detector:
+
+```bash
+./compose.sh exec -T gateway python -c \
+'import json, urllib.request; print(json.dumps(json.load(urllib.request.urlopen("http://127.0.0.1:8090/healthz")), indent=2))'
+```
+
+Its `pii_detector` must also report `state: ready` and `coverage: ner`.
+
+Then open [http://localhost:3000](http://localhost:3000), sign in, and complete a VITA sample. Inspect its trace for successful calls to the configured providers.
+
+A completed report alone does not prove that a provider answered: example agents can use fallback results.
+
+If a check fails:
+
+```bash
+./compose.sh logs --tail=100 backend gateway vector
+```
+
+### 5.8 Remove bootstrap passwords
+
+After successful sign-in, save the account password in your password manager and clear its bootstrap value:
 
 ```ini
-APP_SECRET_KEY=<paste-the-generated-value-here>
+INITIAL_ADMIN_PASSWORD=
+INITIAL_USER_PASSWORD=
 ```
 
-Generate a new value for each installation. Keep the same value across
-ordinary restarts.
-
-#### Optional: full Cribl example
-
-Cribl forwarding uses three files:
-
-| File | Settings |
-|---|---|
-| `.env` | Enable Cribl forwarding and configure logging and trace capture |
-| `observability.env` | Cribl HEC endpoint and token for logs |
-| `observability-traces.env` | Cribl OpenTelemetry gRPC endpoint and token for traces |
-
-Create the two additional files if they do not already exist:
+Apply the change:
 
 ```bash
-cp observability.env.example observability.env
-cp observability-traces.env.example observability-traces.env
-chmod 600 observability.env observability-traces.env
+./compose.sh --profile app --profile viewer up -d
 ```
 
-If the files already exist, update their entries instead of overwriting them.
+The accounts remain. Populated bootstrap values reset their account passwords during subsequent backend starts.
 
-**In `.env`:**
+### 5.9 Enable HTTPS for remote access
+
+Choose a hostname that resolves to the server from the client machines. For example, set:
 
 ```ini
-# Enable the Cribl forwarding configuration
-VECTOR_CRIBL=1
-
-# Leave the alternative vendor selector empty for this Cribl setup
-LIBRERUN_OBS_VENDOR=
-
-# Verbose application logging
-LOG_LEVEL=DEBUG
-
-# Print finished spans and exporter debug information to stderr
-OTEL_DEBUG=true
-
-# Include LLM prompts and completions in run-plane spans and events
-OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=SPAN_AND_EVENT
-
-# Keep application logging to stderr enabled
-LOG_STDERR_ENABLED=true
+LIBRERUN_TLS_DOMAIN=librerun.example.lan
+LIBRERUN_TLS=internal
+LIBRERUN_HTTPS_PORT=8443
+APP_CORS_ORIGINS=https://librerun.example.lan:8443
 ```
 
-This matches the verbose logging and content-capture settings in the example.
-To omit LLM prompts and completions from traces, use:
+Retain these values:
 
 ```ini
-OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=NO_CONTENT
+FRONTEND_PORT=127.0.0.1:3000
+BACKEND_PORT=127.0.0.1:8000
+NEXT_PUBLIC_API_URL=/api/v1
+BACKEND_INTERNAL_URL=http://backend:8000
 ```
 
-**In `observability.env`:**
+Build and start the HTTPS services:
+
+```bash
+./compose.sh --profile app --profile viewer --profile tls up -d --build
+```
+
+Export the local certificate authority:
+
+```bash
+docker cp \
+  librerun-edge:/data/caddy/pki/authorities/local/root.crt \
+  librerun-edge-root.crt
+```
+
+Use `podman cp` if running Podman.
+
+Copy the certificate to each client machine and import it into the relevant operating-system or browser trust store. Then open:
+
+```text
+https://librerun.example.lan:8443
+```
+
+Caddy forwards API requests to the backend and other requests to the frontend. Internal service traffic remains unencrypted on the Compose network.
+
+Jaeger remains local to the server. From a client with SSH access:
+
+```bash
+ssh -N -L 16686:127.0.0.1:16686 <user>@<host-address>
+```
+
+While the tunnel is open, use [http://localhost:16686](http://localhost:16686) on that client.
+
+### 5.10 Stop services
+
+For the HTTPS installation:
+
+```bash
+./compose.sh --profile app --profile viewer --profile tls down
+```
+
+Omit `--profile tls` if it was not enabled. Include any additional profiles you started.
+
+Named data volumes remain. Adding `-v` deletes them.
+
+## 6. Develop agents
+
+These instructions assume the **local demo is running**, its `.env` exists, and example-agent keys have been generated. Use a separate development installation if your existing installation serves other users.
+
+### 6.1 Install the authoring CLI
+
+The CLI requires Python 3.11 or later and pipx.
+
+From the repository root:
+
+```bash
+pipx install ./cli
+librerun doctor
+```
+
+The CLI does not replace Compose. Use it for scaffolding, sample submission, and conformance checks.
+
+### 6.2 Understand the generated files
+
+| File | Edit it to define |
+|---|---|
+| `agent.yaml` | Identity, phases, capabilities, model steps, output mode, and container URL where applicable. |
+| `input_schema.json` | Input fields and validation. |
+| `agent.py` or `server.ts` | Agent behaviour. |
+| `scenarios/demo.json` | A sample request with a `user_inputs` object matching the schema. |
+| `requirements.txt` or `package.json` | Container dependencies. |
+| `Dockerfile` | Container build and startup. |
+
+Container scaffolding also adds a service to `agents.compose.yaml`. When `.env` already exists, it writes the new agent’s gateway key there.
+
+The `framework` manifest field labels the agent. The `runtime` field determines how it executes.
+
+### 6.3 LangGraph
+
+Create the agent:
+
+```bash
+librerun init my-graph --template langgraph
+```
+
+Edit `backend/agents/my_graph/agent.py`:
+
+- Keep the generated `LangGraphAgent` subclass.
+- Replace or extend its graph nodes.
+- Declare every adapter-supplied state field your nodes read.
+- Return the intended result under `structured` in the final state.
+
+The adapter supplies:
+
+| State field | Meaning |
+|---|---|
+| `user_inputs` | Redacted request input. |
+| `prior_analysis` | Previous phase output. |
+| `user_edits` | Instructions supplied when repeating a phase. |
+| `run_id` | Current run identifier. |
+
+Inside a node, use the generated `capabilities_of` import:
+
+```python
+caps = capabilities_of(config)
+
+response = await caps.llm.complete(
+    "answer",
+    [{"role": "user", "content": state["user_inputs"]["question"]}],
+)
+```
+
+Declare `answer` in `llm.steps` and grant `llm` in `capabilities`.
+
+Keep capability objects out of graph state. They contain live, run-scoped services and are unsuitable for checkpoint persistence.
+
+For multiple phases, supply `graphs={"phase_name": compiled_graph, ...}` and declare matching phase names in the manifest.
+
+Update the input schema and sample whenever you change expected input.
+
+Complete reference: [LangGraph Triage](https://github.com/JeremiahJRRoss/librerun/tree/main/backend/agents/_examples/langgraph_triage).
+
+### 6.4 Python SDK
+
+Create a container agent:
+
+```bash
+librerun init my-python --template container-python
+```
+
+Edit `backend/agents/my_python/agent.py`.
+
+The asynchronous `handler(ctx)` receives:
+
+- `ctx.input`: current request input.
+- `ctx.phase`: phase to execute.
+- `ctx.prior_output`: previous phase output.
+- `ctx.user_edits` and `ctx.rerun`: instructions for repeated work.
+- `ctx.seconds_left`: remaining invocation time.
+- Clients for model calls and platform services.
+
+Keep the generated server setup. Return a JSON object from the handler. An exception fails the invocation.
+
+Call models through `ctx.llm`; call steps declared in the manifest. Preserve the template’s distinction between model responses, stub fixtures, and fallback results.
+
+Add dependencies to `requirements.txt`. Add any additional source files to the Dockerfile’s copy instructions: the generated Python Dockerfile initially copies `agent.py` as the application code.
+
+### 6.5 LlamaIndex
+
+Use the Python SDK container to host a LlamaIndex Workflow.
+
+Create a separate agent:
+
+```bash
+librerun init my-summary --template container-python
+```
+
+Copy the working example’s implementation, dependencies, schema, and sample:
+
+```bash
+cp backend/agents/_examples/llamaindex_summarize/agent.py \
+  backend/agents/my_summary/agent.py
+
+cp backend/agents/_examples/llamaindex_summarize/requirements.txt \
+  backend/agents/my_summary/requirements.txt
+
+cp backend/agents/_examples/llamaindex_summarize/input_schema.json \
+  backend/agents/my_summary/input_schema.json
+
+cp backend/agents/_examples/llamaindex_summarize/scenarios/demo-summarize.json \
+  backend/agents/my_summary/scenarios/demo.json
+```
+
+In the copied `agent.py`, change the server’s telemetry name:
+
+```python
+app = serve(handler, name="my-summary")
+```
+
+Replace `backend/agents/my_summary/agent.yaml` with:
+
+```yaml
+manifest_version: 1
+id: my-summary
+name: My Summary
+description: Extracts key points from a document and writes a brief.
+
+runtime: container
+framework: llamaindex
+
+container:
+  url: http://my-summary:8090
+
+input_schema: input_schema.json
+
+phases:
+  - name: summarize
+    deadline_seconds: 300
+    steps:
+      - id: extract
+        label: Extract key points
+      - id: summarize
+        label: Write the brief
+
+output:
+  mode: structured
+
+capabilities: [llm]
+
+llm:
+  steps:
+    - id: extract
+      provider: openai
+      model: gpt-4o-mini
+      temperature: 0.0
+      max_tokens: 500
+      timeout_seconds: 30
+    - id: summarize
+      provider: openai
+      model: gpt-4o-mini
+      temperature: 0.2
+      max_tokens: 600
+      timeout_seconds: 30
+
+scenarios: scenarios
+```
+
+The example constructs its workflow and `OpenAILike` clients for each invocation. `ctx.llm.client()` supplies the gateway address and invocation headers; `ctx.llm.step()` supplies values such as `librerun/extract`.
+
+Retain this per-invocation construction when adapting the workflow. A shared client must not retain a previous invocation’s token.
+
+Complete reference: [LlamaIndex Summarize](https://github.com/JeremiahJRRoss/librerun/tree/main/backend/agents/_examples/llamaindex_summarize).
+
+### 6.6 Vercel AI SDK and TypeScript
+
+Create the agent:
+
+```bash
+librerun init my-typescript --template container-ts
+```
+
+Edit `backend/agents/my_typescript/server.ts`, primarily `work()`.
+
+Retain:
+
+- Per-invocation bearer-token binding.
+- The gateway client and `X-LibreRun-Run-Token` header.
+- Trace-context propagation.
+- Deadline cancellation.
+- Progress and terminal events.
+- Fixture and fallback attribution.
+
+The model call uses:
+
+```typescript
+model: gateway.chat("librerun/answer")
+```
+
+Use the Chat Completions client. Declare `answer` in the manifest’s `llm.steps`.
+
+Update `package.json`, the input schema, and the sample as needed.
+
+There is no LibreRun TypeScript SDK package. The template implements the HTTP contract directly. It has no exporter for its own interior spans; the platform phase and gateway model calls still appear in the run’s trace.
+
+Complete reference: [Vercel AI SDK Answer](https://github.com/JeremiahJRRoss/librerun/tree/main/backend/agents/_examples/vercel_ai_answer_ts).
+
+### 6.7 Build, discover, and check an agent
+
+After scaffolding or editing:
+
+```bash
+./compose.sh \
+  --profile app \
+  --profile viewer \
+  --profile demo \
+  --profile agents \
+  up -d --build
+```
+
+This rebuilds the backend so it discovers the agent package and builds any new container service.
+
+Wait for the readiness checks in section 5.7, then inspect the registration:
+
+```bash
+librerun doctor
+```
+
+Submit and check the chosen agent. For example:
+
+```bash
+librerun run --agent my-python --wait
+librerun battery --agent my-python
+```
+
+Replace `my-python` with the ID you created.
+
+If bootstrap passwords have been cleared:
+
+```bash
+librerun run --agent my-python --wait \
+  --email you@example.com --password-stdin
+```
+
+Enter the password at the prompt.
+
+A gated run is reported as waiting for approval. Open its run page to review and approve it.
+
+The conformance battery checks integration behaviour. For container agents, its CLI path reports the interior-span check as skipped; inspect a real run’s trace to verify your instrumentation.
+
+### 6.8 Configure discovery outside the demo
+
+Starting a container and registering its agent are separate requirements.
+
+- `LIBRERUN_AGENTS_PATH` controls the directories scanned by the backend.
+- `container.url` tells the backend where to invoke a container agent.
+- Compose profiles determine which containers start.
+
+An empty `LIBRERUN_AGENTS_PATH` scans the standard `backend/agents` directory. To include bundled examples in the standard backend container:
 
 ```ini
-# Cribl HEC source: HTTPS base URL and port, without a path
-CRIBL_HEC_ENDPOINT=https://default.main.<cribl-org>.cribl.cloud:8088
-
-# Authentication token configured on the HEC source
-CRIBL_HEC_TOKEN=<cribl-hec-token>
+LIBRERUN_AGENTS_PATH=agents:agents/_examples
 ```
 
-**In `observability-traces.env`:**
+New agents created by the CLI are already under the standard directory.
 
-```ini
-# Cribl OpenTelemetry source: gRPC hostname and port, without a path
-CRIBL_OTLP_ENDPOINT=default.main.<cribl-org>.cribl.cloud:4317
+After changing discovery settings or manifests, rebuild and recreate the backend using the relevant `compose.sh … up -d --build` command.
 
-# Authentication token configured on the OpenTelemetry source
-CRIBL_OTLP_TOKEN=<cribl-otlp-token>
-```
+### 6.9 Other languages and frameworks
 
-**Values to replace:**
+Implement Run Contract v1:
 
-| Variable | What to enter | Example or instructions |
-|---|---|---|
-| `CRIBL_HEC_ENDPOINT` | The exact HTTPS base URL of your Cribl HEC source. | For an illustrative organization named `example-org`: `https://default.main.example-org.cribl.cloud:8088`. Use the endpoint shown by your deployment; omit `/services/collector` and other paths. |
-| `CRIBL_HEC_TOKEN` | The authentication token configured on your Cribl HEC source. | Copy the complete token from the source's authentication settings. |
-| `CRIBL_OTLP_ENDPOINT` | The exact hostname and port of your Cribl OpenTelemetry source configured for gRPC. | For the same illustrative organization: `default.main.example-org.cribl.cloud:4317`. No URL path. |
-| `CRIBL_OTLP_TOKEN` | The authentication token configured on your Cribl OpenTelemetry source. | Copy the complete token. Leave blank only when authentication is disabled on that source. |
+| Endpoint | Responsibility |
+|---|---|
+| `GET /healthz` | Return service health. |
+| `POST /v1/runs` | Accept one phase invocation and bind its bearer token to it. |
+| `GET /v1/runs/{id}/events` | Stream progress and logs, ending with exactly one completed or failed event. |
+| `GET /v1/runs/{id}/output` | Return the completed phase output. |
 
-The Cribl tokens come from your configured sources. They are separate
-credentials from LibreRun's generated `APP_SECRET_KEY`.
+Each invocation receives input, phase information, a deadline, and access to run-scoped services.
 
-Start VITA with Cribl forwarding:
+Use the invocation token for platform requests. Preserve trace context. Send model requests to the gateway with `model: "librerun/<step-id>"`.
+
+The detailed protocol is [Run Contract v1](https://github.com/JeremiahJRRoss/librerun/blob/main/docs/authoring/Run_Contract_v1.md).
+
+## 7. Python SDK reference
+
+The SDK supports Python 3.11 or later. Install it from the checkout in a Python virtual environment:
 
 ```bash
-./compose.sh --profile app --profile cribl up -d --build
+pip install "./sdk/python/librerun-agent[uvicorn,otel]"
 ```
 
-If Jaeger is also configured and enabled:
+The generated Python container performs this installation. The project does not publish the package to PyPI.
 
-```bash
-./compose.sh --profile app --profile viewer --profile cribl up -d --build
+| Need | Interface |
+|---|---|
+| Serve the handler | `serve(handler)` |
+| Read invocation data | `ctx.input`, `ctx.phase`, `ctx.run_id`, `ctx.invocation_id`, `ctx.tenant_id` |
+| Continue or repeat work | `ctx.prior_output`, `ctx.user_edits`, `ctx.rerun` |
+| Check time | `ctx.deadline`, `ctx.seconds_left` |
+| Report progress | `ctx.progress(status, step=..., label=..., detail=...)` |
+| Write a run log | `ctx.log(message, level="info")` |
+| Call a model step | `await ctx.llm.text(step_id, prompt)` or `await ctx.llm.complete(step_id, messages)` |
+| Connect a framework client | `ctx.llm.client()`, `ctx.llm.step(step_id)` |
+| Read effective configuration | `await ctx.config.steps()`, `await ctx.config.step(step_id)`, `await ctx.config.settings()` |
+| Search the knowledge base | `await ctx.capabilities.kb_search(query, top_k=3)` |
+| Read temporary run data | `await ctx.capabilities.run_store_get(key)` |
+| Write temporary run data | `await ctx.capabilities.run_store_set(key, value)` |
+| Record an audit event | `await ctx.capabilities.audit_log(action_type, detail)` |
+| Redact text | `await ctx.pii.redact(text)` |
+| Read a declared tool secret | `await ctx.secrets.get(name)` |
+
+### Capabilities and configuration
+
+Declare the platform capabilities the agent uses in `agent.yaml`. Recognised capability names include `llm`, `kb`, `run_store`, `progress`, `audit`, and `pii`.
+
+Configuration reads and declared tool-secret reads require no separate capability grant.
+
+Container progress travels through Run Contract events. Model calls use the gateway. Other listed remote services use the run-scoped MCP endpoint.
+
+### Knowledge search
+
+The `kb` capability requires a configured Pinecone API key, environment setting, index, and searchable data in the tenant’s namespace. Query embeddings use the gateway.
+
+Missing configuration or a search failure can return an empty result list. An empty list does not establish that no relevant document exists.
+
+### Temporary storage
+
+The run store holds JSON values scoped to a run. Its entries expire. Use it for temporary working data, not durable records.
+
+### Personal information
+
+LibreRun uses Presidio and pattern matching to detect supported PII. Its named-entity detection currently uses English.
+
+Input submitted through the platform is redacted before the agent receives it. Redact independently fetched text before using it:
+
+```python
+clean_text = await ctx.pii.redact(fetched_text)
 ```
 
-Inspect the forwarding logs:
+If this call fails, stop processing that content or omit it. Do not substitute the original text.
 
-```bash
-./compose.sh logs --tail=100 vector otel-bridge
+Gateway outbound redaction is enabled by default. This does not mean every provider response is rewritten before reaching the agent; storage and telemetry boundaries perform their own checks.
+
+Test detection against the languages and data formats your service handles.
+
+### Tool secrets
+
+Declare names under `secrets`:
+
+```yaml
+secrets:
+  - search_api_key
 ```
 
----
+Read the value for the invocation:
 
-## Bring your agent
-
-```bash
-pipx install "git+https://github.com/JeremiahJRRoss/librerun#subdirectory=cli"
-librerun init my-agent --template langgraph
-librerun up
-librerun run --agent my-agent --wait
-librerun battery --agent my-agent
+```python
+key = await ctx.secrets.get("search_api_key")
 ```
 
-`init` scaffolds the agent; `--template container-python` or
-`container-ts` takes the container path instead. `up` rebuilds and starts
-the stack, and the agent appears on the new-run page. `run --wait`
-submits its sample and follows it to the end. `battery` is the
-conformance battery: green means done. Run them from inside the clone.
-Already have a clone? `pipx install ./cli` installs the CLI from it,
-which needs pipx and Python 3.11 or later.
+The platform resolves the tenant’s value, then the agent-wide default. `SecretNotSet` means neither is configured. A container does not receive an automatic fallback from the backend’s environment.
 
-**In-process** (`langgraph`): your graph runs inside the backend, reaches
-the platform through `ctx.caps`, and is the fastest path if you are
-already on LangGraph.
+Keep secret values out of prompts, output, progress, and logs.
 
-**As a container** (`container-python`, `container-ts`): your agent is
-its own image speaking the Run Contract over HTTP+SSE, network-isolated
-on an internal network, reaching the platform through three doors that
-the run token opens. Any language works; the Python SDK and the
-TypeScript reference server are starting points, not requirements.
+### Logs and traces
 
-Either way you declare your LLM steps in `agent.yaml` and never name a
-model in code — an admin retargets a step in the UI and nothing
-restarts. [`docs/authoring/Quickstart.md`](docs/authoring/Quickstart.md)
-is the hour path end to end.
+The Python SDK captures `print()` and Python logging inside an invocation and attributes them to that run.
 
----
+With the `otel` extra and the configured relay endpoint, its exporter sends traces and logs through LibreRun’s authenticated relay. The generated Python container includes this configuration.
 
-## What you get
+Agent-container logs are routed through the platform. The supplied Compose services disable the container logging driver, so `docker logs` is not the agent-log interface.
 
-| | |
+## 8. Licensing
+
+| Material | License |
 |---|---|
-| **Intake** | A wizard generated from the agent's declared input schema, with a PII redaction preview before anything is stored |
-| **Run lifecycle** | Phases, live step progress, a human approval gate between phases, edit-and-re-run, soft delete |
-| **PII redaction** | Presidio NER plus a four-stage regex pipeline at intake, upload, the run boundary, the MCP tool, telemetry and the gateway's outbound leg — failing closed when the detector is not ready |
-| **Model configuration** | Per step, per tenant, in the admin UI; the gateway resolves provider, model and key at request time, so no redeploy and no restart |
-| **The gateway** | One door to every model. Agents never hold a provider key; keyless stub mode runs the whole pipeline with none configured |
-| **Reports** | HTML in the page and PDF export from the same Jinja template, so what you read is what you download |
-| **Feedback** | Per-section thumbs, persisted, with an admin dashboard |
-| **Observability** | OpenTelemetry through a bundled Vector router; Jaeger in the box; tested Cribl, Datadog, Elastic and Splunk overlays; three stamped telemetry planes |
-| **Multi-tenancy** | Tenant scoping on every query, email/password plus Google and Microsoft SSO, JWT sessions, an audit log per run |
-| **Operations** | Secrets partitioned per process, `<NAME>_FILE` for container secret stores, sops + age encryption at rest, `librerun doctor`, `librerun key rotate` |
+| First-party platform code, VITA, and documentation | AGPL-3.0-only |
+| `sdk/` | Apache-2.0 |
+| `backend/adapters/` | Apache-2.0 |
+| `cli/src/librerun/templates/` | Apache-2.0 |
+| `backend/agents/_examples/` | Apache-2.0 |
 
-Built on Python 3.12 + FastAPI, Next.js 14 + TypeScript, PostgreSQL 16
-and Valkey 8, orchestrated by Docker Compose or Podman Compose —
-`compose.yaml` with `agents.compose.yaml`, driven by `compose.sh` — on
-Linux.
+Third-party material retains its own licenses and notices.
 
----
+If you modify the AGPL-covered program and allow remote network interaction, your modified version must offer those users its Corresponding Source as required by the license.
 
-<a id="what-10-does-not-do-yet"></a>
+The Apache licenses cover the listed components. They do not determine every licensing obligation of an agent combined with other code, including an in-process integration.
 
-## What the beta does not do yet
+Preserve applicable notices when reusing or distributing material. LibreRun is provided without warranty. DOCI has separate licensing status in its own repository.
 
-Stated here rather than discovered later, and line for line the beta's
-announcement. Each has a place in the
-[roadmap](docs/release/v1.1.0-beta.1.md#roadmap), except the gRPC
-transport, which is not planned.
-
-**Interaction (v1.1, October 2026)**
-
-- No mid-run human input inside a phase: gates sit *between* the phases
-  an agent declares.
-- No reject-with-note at the gate. You approve, or edit and re-run.
-- No artifact store, so an agent's intermediate drafts cannot be
-  downloaded.
-- No automatic resume of a phase the backend was restarted under. The
-  run is marked `error` with the reason at the next boot.
-
-**Authoring (v1.1–v1.2)**
-
-- No TypeScript SDK. The Vercel example is a reference server, not a
-  package.
-- No in-process adapters beyond LangGraph; everything else is a
-  container.
-- No gRPC transport, deliberately. HTTP, server-sent events and MCP are
-  the control plane; a gRPC binding is considered only if someone needs
-  the transport rather than the functions.
-
-**Evaluation and cost (v1.2, November 2026)**
-
-- No evaluation beyond scenarios that prefill and submit — no `expect`
-  blocks, no scored runs.
-- No measured answer-quality baseline for the VITA demo agent. A keyless
-  run proves the wiring, not the judgement.
-- No per-run cost panel in the UI. The cost is on the trace.
-- No smart cost-versus-quality routing between models.
-- No page yet teaches evaluation or optimization. The instruments are in
-  the tree — the gateway, the edge proxy, the cache, the trace — and the
-  lessons that use them are not written.
-
-**UX (v1.2)**
-
-- No live event stream. The run page polls every 2 s while a run is
-  going, and stops when it ends.
-
-**Deployment**
-
-- TLS only at the edge, and only when you turn it on: the opt-in `tls`
-  profile serves the UI and the API over HTTPS on one port, while the
-  plain ports (3000 and 8000) stay on `127.0.0.1`, their default, which
-  `compose.sh` enforces — on Docker the binding, not a host firewall,
-  keeps a port off the network
-  ([`Install.md`](docs/platform/Install.md#https-at-the-edge)). An `.env`
-  copied from 1.0's example keeps both ports on every interface until its
-  two lines are edited.
-- Behind the edge, LibreRun's own services — Postgres, the cache, the
-  gateway, telemetry — still talk plain HTTP on the compose network.
-  TLS between them is on the roadmap, v1.2 and later.
-
-Nothing in this list is a bug report. They are the edges of what the
-beta claims, and the list is checked against the roadmap at release.
-
----
-
-## Documentation
-
-**Start here** — [`docs/platform/Install.md`](docs/platform/Install.md)
-to run it, [`docs/authoring/Quickstart.md`](docs/authoring/Quickstart.md)
-to build on it.
-
-| Platform — running LibreRun | |
-|---|---|
-| [`docs/platform/Install.md`](docs/platform/Install.md) | Installation on Linux, run modes, secrets, upgrades, troubleshooting |
-| [`docs/platform/Install_CentOS_Ubuntu.md`](docs/platform/Install_CentOS_Ubuntu.md) | The per-OS layer: CentOS Stream 10 and Ubuntu 26.04 |
-| [`docs/platform/Security.md`](docs/platform/Security.md) | The trust model, tenancy, PII, where each secret lives, every flow that leaves the box |
-| [`docs/release/License_Scope_Map.md`](docs/release/License_Scope_Map.md) | Which licence covers which path, the provenance the tree can show, the maintainer's attestation |
-| [`docs/release/Distribution_Surface_Matrix.md`](docs/release/Distribution_Surface_Matrix.md) | Every source of bytes a source build fetches, how each is pinned, and who moves it next |
-| [`docs/platform/Observability.md`](docs/platform/Observability.md) | The telemetry planes and the Cribl, Datadog, Elastic and Splunk overlays |
-| [`docs/platform/Browser_Observability.md`](docs/platform/Browser_Observability.md) | The UX plane: the RUM envelope, the relay, the privacy model |
-
-| Authoring — building an agent | |
-|---|---|
-| [`docs/authoring/Quickstart.md`](docs/authoring/Quickstart.md) | Your agent in an hour: the `librerun` CLI and the three templates |
-| [`docs/authoring/LangGraph.md`](docs/authoring/LangGraph.md) | Bringing a graph from another framework in-process |
-| [`docs/authoring/Container_Agents.md`](docs/authoring/Container_Agents.md) | The container path, walked end to end |
-| [`docs/authoring/SDK.md`](docs/authoring/SDK.md) | The `librerun-agent` Python SDK |
-| [`docs/authoring/LLM_Gateway.md`](docs/authoring/LLM_Gateway.md) | One door to every model: steps, credentials, outbound redaction, keyless mode |
-| [`docs/authoring/Capabilities_and_MCP.md`](docs/authoring/Capabilities_and_MCP.md) | The six capabilities and the run-scoped MCP tools |
-| [`docs/authoring/Manifest.md`](docs/authoring/Manifest.md) | Every `agent.yaml` field, generated from the models |
-| [`docs/authoring/Run_Contract_v1.md`](docs/authoring/Run_Contract_v1.md) | The normative HTTP+SSE wire spec |
-| [`docs/authoring/Agents_Design.md`](docs/authoring/Agents_Design.md) | The agent contract, the lifecycle and the platform invariants |
-| [`docs/authoring/Agents_Install.md`](docs/authoring/Agents_Install.md) | Installing an agent: directory layout, discovery, packaging |
-
-| API | |
-|---|---|
-| [`docs/api/openapi.yaml`](docs/api/openapi.yaml) | OpenAPI 3.1, generated from the running app and drift-checked in CI |
-
-| The demo agent | |
-|---|---|
-| VITA | Comes pre-loaded with every install: no download, no key, selectable on the new-run page from the first boot |
-| [`docs/agents/vita/User_Manual.md`](docs/agents/vita/User_Manual.md) | The customer and administrator manual |
-| [`backend/agents/vita_v1/agent.yaml`](backend/agents/vita_v1/agent.yaml) | The demo agent's manifest: its LLM steps and settings, with their defaults |
-
-| Add-on agents | |
-|---|---|
-| [DOCI](https://github.com/JeremiahJRRoss/librerun-doci) | An add-on agent, installed as a module from its own repository, which documents it; not in the box |
-
-| Release | |
-|---|---|
-| [`docs/release/v1.1.0-beta.1.md`](docs/release/v1.1.0-beta.1.md) | The beta's announcement: what LibreRun is for, the promises, what the beta adds and does not do yet, what a beta means, the roadmap, how it was certified |
-| [`docs/release/v1.0.0.md`](docs/release/v1.0.0.md) | The 1.0 record: certified on 2026-09-22 and never published |
-| [`docs/platform/Releasing.md`](docs/platform/Releasing.md) | How a release is cut: the version, the tag, what it publishes, and the checks that stand in its way |
-| [`CHANGELOG.md`](CHANGELOG.md) | What changed, batch by batch |
-
----
-
-## License and marks
-
-LibreRun is licensed under **AGPL-3.0-only**, the GNU Affero General
-Public License, version 3 only ([`LICENSE`](LICENSE)). Four directories
-an agent builds on — `sdk/`, `backend/adapters/`, the CLI's templates
-and the examples — are Apache-2.0 instead, so an agent does not take on
-the AGPL by importing or copying them. [`NOTICE`](NOTICE) carries the
-copyright statement and the notices of the third-party material in the
-tree; [`THIRD_PARTY.md`](THIRD_PARTY.md) lists what a build downloads;
-the [licence scope map](docs/release/License_Scope_Map.md) says which
-licence covers which path. If you modify LibreRun and let others use it
-over a network, the AGPL asks you to offer them your version's source.
-LibreRun comes **with no warranty**: it is provided as is, without
-warranty of any kind, express or implied, as sections 15 and 16 of the
-licence state, and nothing in this repository adds one.
+See [LICENSE](https://github.com/JeremiahJRRoss/librerun/blob/main/LICENSE), [NOTICE](https://github.com/JeremiahJRRoss/librerun/blob/main/NOTICE), and the [license scope map](https://github.com/JeremiahJRRoss/librerun/blob/main/docs/release/License_Scope_Map.md). The LibreRun name is governed separately by [TRADEMARKS.md](https://github.com/JeremiahJRRoss/librerun/blob/main/TRADEMARKS.md).
